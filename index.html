@@ -27,6 +27,7 @@ body { margin:0; overflow:hidden; background:#87ceeb; }
   background:white;
   transform:translate(-50%,-50%);
   border-radius:50%;
+  z-index:10;
 }
 canvas { display:block; }
 </style>
@@ -45,6 +46,7 @@ import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.161/examples/js
 /* ---------------- SCENE ---------------- */
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
+
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
 const sun = new THREE.DirectionalLight(0xffffff, 1);
@@ -121,31 +123,50 @@ function createGround(x,z){
   return mesh;
 }
 
-/* ---------------- GLB TREE ---------------- */
+/* ---------------- TREES ---------------- */
+let treeModel = null;
+
+const loader = new GLTFLoader();
+
+/* pending system */
+const pendingTrees = {};
+
+/* GLB LOAD */
 loader.load(
   "baum.glb",
   (gltf) => {
-    const model = gltf.scene;
+    console.log("GLB LOADED");
+    treeModel = gltf.scene;
 
-    scene.add(model);
+    // 🔥 alles nachladen
+    for(const key in pendingTrees){
+      const group = chunks[key];
+      if(!group) continue;
 
-    model.position.set(0, 0, -5);
-    model.scale.set(5, 5, 5);
+      pendingTrees[key].forEach(t => {
+        const tree = treeModel.clone();
+        tree.position.set(t.x,t.y,t.z);
+        tree.scale.set(2,2,2);
+        group.add(tree);
+      });
+    }
 
-    console.log("GLB ADDED TO SCENE");
+    pendingTrees = {};
   },
   undefined,
   (err) => {
     console.error("GLB ERROR:", err);
+    hud.innerHTML = "GLB ERROR ❌";
   }
 );
+
 /* ---------------- CHUNKS ---------------- */
 function createChunk(cx,cz){
   const key = cx+","+cz;
   if(chunks[key]) return;
 
   const group = new THREE.Group();
-  group.userData.pendingTrees = [];
+  chunks[key] = group;
 
   const worldX = cx * CHUNK_SIZE;
   const worldZ = cz * CHUNK_SIZE;
@@ -163,14 +184,15 @@ function createChunk(cx,cz){
       tree.scale.set(2,2,2);
       group.add(tree);
     } else {
-      group.userData.pendingTrees.push({x,y,z});
+      if(!pendingTrees[key]) pendingTrees[key] = [];
+      pendingTrees[key].push({x,y,z});
     }
   }
 
   scene.add(group);
-  chunks[key] = group;
 }
 
+/* UPDATE */
 function updateChunks(px,pz){
   const cx = Math.floor(px/CHUNK_SIZE);
   const cz = Math.floor(pz/CHUNK_SIZE);
@@ -183,6 +205,9 @@ function updateChunks(px,pz){
 }
 
 /* ---------------- LOOP ---------------- */
+let velocityY = 0;
+let canJump = false;
+
 let fps=0, frames=0, last=performance.now();
 
 function animate(){
@@ -241,7 +266,7 @@ function animate(){
 
 animate();
 
-/* RESIZE */
+/* resize */
 window.addEventListener("resize",()=>{
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
