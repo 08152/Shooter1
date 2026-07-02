@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>CHUNK FOG WORLD</title>
+<title>10k Chunk World</title>
 
 <style>
 body { margin:0; overflow:hidden; }
@@ -19,27 +19,40 @@ body { margin:0; overflow:hidden; }
 </head>
 <body>
 
-<div id="hud">CHUNK WORLD + FOG + COORD TREES</div>
+<div id="hud">10K WORLD + CHUNKS + NO LAG</div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 
 <script>
 
+// ================= WORLD SIZE =================
+const WORLD_SIZE = 10000;
+const chunkSize = 100;
+const halfWorld = WORLD_SIZE / 2;
+
 // ================= SCENE =================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87cfff);
+scene.fog = new THREE.Fog(0x87cfff, 50, 400);
 
-// 🌫️ NEBEL (WICHTIG!)
-scene.fog = new THREE.Fog(0x87cfff, 20, 120);
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 3000);
+camera.position.y = 3;
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 2000);
-const renderer = new THREE.WebGLRenderer();
+const renderer = new THREE.WebGLRenderer({ antialias:false });
 renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(1);
 document.body.appendChild(renderer.domElement);
 
 // LIGHT
 scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
+
+// ================= TEXTURE =================
+const tex = new THREE.TextureLoader().load(
+"https://threejs.org/examples/textures/terrain/grasslight-big.jpg"
+);
+tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+tex.repeat.set(2,2);
 
 // ================= INPUT =================
 const keys = {};
@@ -54,91 +67,97 @@ loader.load("./baum.glb",(gltf)=>{
 treeModel = gltf.scene;
 });
 
-// ================= CHUNKS =================
-const chunkSize = 50;
-const chunks = new Map();
+// ================= TREES (EINFACH HIER EDITIEREN) =================
+// 👉 HIER 1 ZEILE PRO BAUM
+const treeCoords = [
+  {x: 100, z: 100},
+  {x: -300, z: 200},
+  {x: 500, z: -400}
+];
 
+// ================= CHUNKS =================
+const chunks = new Map();
+const renderDistance = 1;
+
+// ================= CREATE TREE FUNCTION =================
+function spawnTree(x,z){
+if(!treeModel) return;
+const t = treeModel.clone();
+t.position.set(x,0,z);
+t.scale.set(1,1,1);
+return t;
+}
+
+// ================= CHUNK =================
 function createChunk(cx, cz){
 
 const key = cx+","+cz;
 if(chunks.has(key)) return;
 
+// WORLD LIMIT CHECK (10k border)
+const worldLimit = WORLD_SIZE / (2 * chunkSize);
+if(Math.abs(cx) > worldLimit || Math.abs(cz) > worldLimit) return;
+
 const group = new THREE.Group();
 
 // ground
 const ground = new THREE.Mesh(
-new THREE.PlaneGeometry(chunkSize,chunkSize),
-new THREE.MeshStandardMaterial({color:0x228b22})
+new THREE.PlaneGeometry(chunkSize, chunkSize),
+new THREE.MeshBasicMaterial({ map: tex })
 );
+
 ground.rotation.x = -Math.PI/2;
 group.add(ground);
 
-// load trees for THIS chunk
-loadTreesForChunk(group, cx, cz);
+// trees ONLY inside chunk
+for(const t of treeCoords){
+const tx = Math.floor(t.x / chunkSize);
+const tz = Math.floor(t.z / chunkSize);
+
+if(tx === cx && tz === cz){
+group.add(spawnTree(t.x, t.z));
+}
+}
 
 scene.add(group);
 chunks.set(key, group);
 }
 
-// ================= TREE COORDINATE SYSTEM =================
+// ================= CLEANUP =================
+function cleanup(cx, cz){
+for(const [key,chunk] of chunks){
+const [x,z] = key.split(",").map(Number);
 
-// 👉 HIER KOMMEN DEINE BÄUME REIN
-const treeCoords = [
-{ x: 10, z: 10 },
-{ x: 15, z: -20 },
-{ x: -5, z: 30 },
-{ x: 0, z: 0 }
-];
-
-// ================= TREE SPAWNER =================
-function loadTreesForChunk(group, cx, cz){
-
-if(!treeModel) return;
-
-for(const t of treeCoords){
-
-// nur Bäume im aktuellen Chunk anzeigen
-const inChunkX = Math.floor(t.x / chunkSize) === cx;
-const inChunkZ = Math.floor(t.z / chunkSize) === cz;
-
-if(inChunkX && inChunkZ){
-
-const tree = treeModel.clone();
-
-tree.position.set(t.x, 0, t.z);
-tree.scale.set(1,1,1);
-
-group.add(tree);
+if(Math.abs(x-cx)>renderDistance || Math.abs(z-cz)>renderDistance){
+scene.remove(chunk);
+chunks.delete(key);
 }
-
 }
 }
 
-// ================= CHUNK UPDATE =================
+// ================= UPDATE =================
 function updateChunks(){
 
 const cx = Math.floor(camera.position.x / chunkSize);
 const cz = Math.floor(camera.position.z / chunkSize);
 
-// nur aktueller Chunk + Umgebung
-for(let x=-1;x<=1;x++){
-for(let z=-1;z<=1;z++){
+for(let x=-renderDistance;x<=renderDistance;x++){
+for(let z=-renderDistance;z<=renderDistance;z++){
 createChunk(cx+x, cz+z);
 }
 }
 
+cleanup(cx, cz);
 }
 
 // ================= MOVE =================
 function move(){
-
-const speed = 0.3;
+const speed = 5;
 
 if(keys["w"]) camera.position.z -= speed;
 if(keys["s"]) camera.position.z += speed;
 if(keys["a"]) camera.position.x -= speed;
 if(keys["d"]) camera.position.x += speed;
-
 }
 
 // ================= LOOP =================
@@ -154,7 +173,7 @@ renderer.render(scene,camera);
 animate();
 
 addEventListener("resize",()=>{
-camera.aspect=innerWidth/innerHeight;
+camera.aspect = innerWidth/innerHeight;
 camera.updateProjectionMatrix();
 renderer.setSize(innerWidth,innerHeight);
 });
