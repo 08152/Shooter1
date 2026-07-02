@@ -1,297 +1,221 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-<meta charset="UTF-8">
-<title>FPS WORLD (NO WEAPONS)</title>
-
-<style>
-body { margin:0; overflow:hidden; background:#87cfff; }
-
-#crosshair{
-  position:absolute;
-  top:50%;
-  left:50%;
-  width:10px;height:10px;
-  transform:translate(-50%,-50%);
-}
-#crosshair:before,#crosshair:after{
-  content:"";
-  position:absolute;
-  background:white;
-}
-#crosshair:before{width:2px;height:10px;left:4px;}
-#crosshair:after{width:10px;height:2px;top:4px;}
-
-#coords{
-  position:absolute;
-  bottom:10px;
-  right:10px;
-  color:white;
-  font-family:Arial;
-  font-size:13px;
-  background:rgba(0,0,0,0.4);
-  padding:6px;
-  border-radius:6px;
-  white-space:pre;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js 3D Welt - Optimiert</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #efd1b5; font-family: sans-serif; user-select: none; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.6); padding: 12px; border-radius: 5px; font-size: 14px; line-height: 1.4; pointer-events: none; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: white; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; mix-blend-mode: difference; }
+        #blocker { position: absolute; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; color: white; cursor: pointer; text-align: center; }
+    </style>
 </head>
-
 <body>
 
-<div id="crosshair"></div>
-<div id="coords"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-
-<script>
-
-// ================= SCENE =================
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87cfff);
-scene.fog = new THREE.Fog(0x87cfff, 40, 200);
-
-// CAMERA
-const camera = new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,5000);
-
-// RENDERER
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(innerWidth,innerHeight);
-document.body.appendChild(renderer.domElement);
-
-// LIGHT
-scene.add(new THREE.AmbientLight(0xffffff,1.2));
-const sun = new THREE.DirectionalLight(0xffffff,1.2);
-sun.position.set(20,40,10);
-scene.add(sun);
-
-// ================= GROUND =================
-const ground = new THREE.Mesh(
-new THREE.PlaneGeometry(10000,10000),
-new THREE.MeshStandardMaterial({color:0x3fa34d})
-);
-ground.rotation.x = -Math.PI/2;
-scene.add(ground);
-
-// ================= PLAYER =================
-const player = new THREE.Object3D();
-scene.add(player);
-player.add(camera);
-camera.position.set(0,2.2,0);
-
-// ================= INPUT =================
-const keys = {};
-document.addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
-document.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
-
-// ================= LOOK =================
-let yaw=0,pitch=0;
-
-document.addEventListener("mousemove",(e)=>{
-if(document.pointerLockElement!==document.body)return;
-
-yaw -= e.movementX*0.002;
-pitch -= e.movementY*0.002;
-pitch=Math.max(-1.2,Math.min(1.2,pitch));
-
-player.rotation.y=yaw;
-camera.rotation.x=pitch;
-});
-
-document.body.addEventListener("click",()=>document.body.requestPointerLock());
-
-// ================= PHYSICS =================
-let velY=0;
-let onGround=true;
-
-// ================= MOVE =================
-function move(){
-
-const speed=0.18;
-
-let dir=new THREE.Vector3();
-if(keys["w"])dir.z-=1;
-if(keys["s"])dir.z+=1;
-if(keys["a"])dir.x-=1;
-if(keys["d"])dir.x+=1;
-
-dir.normalize();
-
-const forward=new THREE.Vector3(0,0,-1).applyEuler(player.rotation);
-forward.y=0;forward.normalize();
-
-const right=new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).negate();
-
-player.position.addScaledVector(forward,dir.z*speed);
-player.position.addScaledVector(right,dir.x*speed);
-}
-
-// ================= GRAVITY =================
-window.addEventListener("keydown",(e)=>{
-if(e.code==="Space" && onGround){
-velY=0.25;
-onGround=false;
-}
-});
-
-function gravity(){
-velY-=0.015;
-player.position.y+=velY;
-
-if(player.position.y<=0){
-player.position.y=0;
-velY=0;
-onGround=true;
-}
-}
-
-// ================= GLB LOADER =================
-const loader = new THREE.GLTFLoader();
-let collidables=[];
-
-function addModel(url,x,y,z,scale=1){
-
-loader.load(url,(gltf)=>{
-
-const obj=gltf.scene;
-obj.scale.set(scale,scale,scale);
-obj.position.set(x,y,z);
-
-obj.userData.box=new THREE.Box3();
-
-scene.add(obj);
-collidables.push(obj);
-
-});
-}
-
-// ================= SIMPLE COLLISION =================
-function getBox(pos){
-return new THREE.Box3().setFromCenterAndSize(
-new THREE.Vector3(pos.x,pos.y+1,pos.z),
-new THREE.Vector3(0.6,1.8,0.6)
-);
-}
-
-function collision(){
-
-const speed=0.18;
-
-let dir=new THREE.Vector3();
-if(keys["w"])dir.z-=1;
-if(keys["s"])dir.z+=1;
-if(keys["a"])dir.x-=1;
-if(keys["d"])dir.x+=1;
-
-dir.normalize();
-
-const forward=new THREE.Vector3(0,0,-1).applyEuler(player.rotation);
-forward.y=0;forward.normalize();
-
-const right=new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).negate();
-
-const move=new THREE.Vector3();
-move.addScaledVector(forward,dir.z*speed);
-move.addScaledVector(right,dir.x*speed);
-
-const next=player.position.clone().add(move);
-const box=getBox(next);
-
-let blocked=false;
-
-for(let obj of collidables){
-
-obj.userData.box.setFromObject(obj);
-
-if(box.intersectsBox(obj.userData.box)){
-blocked=true;
-break;
-}
-}
-
-if(!blocked)player.position.copy(next);
-}
-
-// ================= CHUNKS =================
-const CHUNK=200;
-const DIST=3;
-const chunks=new Map();
-
-function key(x,z){return x+","+z;}
-
-function spawnChunk(cx,cz){
-
-const k=key(cx,cz);
-if(chunks.has(k))return;
-
-const group=new THREE.Group();
-
-for(let i=0;i<6;i++){
-
-const x=cx*CHUNK+(Math.random()-0.5)*CHUNK;
-const z=cz*CHUNK+(Math.random()-0.5)*CHUNK;
-
-addModel("baum.glb",x,0,z,1.5);
-}
-
-scene.add(group);
-chunks.set(k,group);
-}
-
-function updateChunks(){
-
-const cx=Math.floor(player.position.x/CHUNK);
-const cz=Math.floor(player.position.z/CHUNK);
-
-const active=new Set();
-
-for(let x=cx-DIST;x<=cx+DIST;x++){
-for(let z=cz-DIST;z<=cz+DIST;z++){
-active.add(key(x,z));
-spawnChunk(x,z);
-}
-}
-
-for(let k of chunks.keys()){
-if(!active.has(k)){
-chunks.delete(k);
-}
-}
-}
-
-// ================= OBJECTS =================
-addModel("barrier.glb",0,-50,0,1);
-addModel("tree.glb",-10,0,-10,1);
-addModel("tree.glb",10,0,10,1);
-addModel("bush.glb",20,0,5,1);
-
-// ================= LOOP =================
-function animate(){
-requestAnimationFrame(animate);
-
-move();
-collision();
-gravity();
-updateChunks();
-
-document.getElementById("coords").innerText=
-`X:${player.position.x.toFixed(2)}
-Y:${player.position.y.toFixed(2)}
-Z:${player.position.z.toFixed(2)}`;
-
-renderer.render(scene,camera);
-}
-
-animate();
-
-// ================= RESIZE =================
-window.addEventListener("resize",()=>{
-camera.aspect=innerWidth/innerHeight;
-camera.updateProjectionMatrix();
-renderer.setSize(innerWidth,innerHeight);
-});
-
-</script>
-</body>
-</html>
+    <div id="blocker">
+        <div>
+            <h1>Klicken zum Spielen</h1>
+            <p>WASD = Bewegen | Leertaste = Springen | Maus = Umsehen</p>
+        </div>
+    </div>
+    <div id="crosshair"></div>
+    <div id="ui">Koordinaten: X: 0 | Y: 0 | Z: 0<br>Geladene Chunks: 0</div>
+
+    <!-- Vollständige Einbindung aller benötigten Skripte über CDN -->
+    <script src="https://cloudflare.com"></script>
+    <script src="https://jsdelivr.net"></script>
+
+    <script>
+        // --- 1. GLOBALE ENGINE & ATMO ---
+        const blocker = document.getElementById('blocker');
+        const ui = document.getElementById('ui');
+        
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xefd1b5);
+        scene.fog = new THREE.FogExp2(0xefd1b5, 0.007); // Nebel optimiert
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance-Sicherung für Retina-Displays
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Beleuchtung
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(100, 300, 100);
+        scene.add(dirLight);
+
+        // --- 2. LOADER & KOLLISIONSDATEN ---
+        const gltfLoader = new THREE.GLTFLoader();
+        let collidables = []; // Hier landen alle Meshes für das Raycasting
+        const raycaster = new THREE.Raycaster();
+
+        function addModel(url, x, y, z, scale = 1) {
+            gltfLoader.load(url, (gltf) => {
+                const obj = gltf.scene;
+                obj.scale.set(scale, scale, scale);
+                obj.position.set(x, y, z);
+                
+                obj.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        collidables.push(child); // Automatische Registrierung für Kollision
+                    }
+                });
+                scene.add(obj);
+            }, undefined, (error) => {
+                // Automatischer Fallback-Baum, falls baum.glb lokal fehlt
+                createFallbackTree(x, y, z);
+            });
+        }
+
+        function createFallbackTree(x, y, z) {
+            const group = new THREE.Group();
+            
+            const trunkGeo = new THREE.CylinderGeometry(0.4, 0.6, 5, 8);
+            const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5c4033 });
+            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            trunk.position.y = 2.5;
+            group.add(trunk);
+            collidables.push(trunk); // Stamm kollidiert
+
+            const leavesGeo = new THREE.SphereGeometry(2, 8, 8);
+            const leavesMat = new THREE.MeshLambertMaterial({ color: 0x2e8b57 });
+            const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+            leaves.position.y = 5;
+            group.add(leaves);
+
+            group.position.set(x, y, z);
+            scene.add(group);
+        }
+
+        // --- 3. OPTIMIERTES CHUNK-SYSTEM (Time-Slicing) ---
+        const WORLD_SIZE = 10000;
+        const CHUNK_SIZE = 100;
+        const VIEW_DISTANCE = 2; // Radius um den Spieler herum
+        const loadedChunks = new Map();
+        let chunkQueue = []; // Warteschlange für flüssigen Aufbau
+
+        const floorGeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE);
+        const floorMat = new THREE.MeshLambertMaterial({ color: 0x4a752c });
+
+        function queueChunkGeneration(cx, cz) {
+            const chunkKey = `${cx},${cz}`;
+            if (loadedChunks.has(chunkKey) || chunkQueue.some(c => c.key === chunkKey)) return;
+            
+            // In die Warteschlange einreihen statt sofort zu blockieren
+            chunkQueue.push({ cx, cz, key: chunkKey });
+        }
+
+        function processChunkQueue() {
+            // Verarbeite maximal 1 Chunk pro Frame, um Framedrops (Ruckler) komplett zu verhindern
+            if (chunkQueue.length === 0) return;
+            
+            const { cx, cz, key } = chunkQueue.shift();
+            const chunkGroup = new THREE.Group();
+            
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.set(cx * CHUNK_SIZE + CHUNK_SIZE/2, 0, cz * CHUNK_SIZE + CHUNK_SIZE/2);
+            floor.receiveShadow = true;
+            chunkGroup.add(floor);
+
+            // Generiere Bäume im neu erzeugten Chunk
+            for(let i = 0; i < 4; i++) {
+                const bx = floor.position.x + (Math.random() - 0.5) * (CHUNK_SIZE - 15);
+                const bz = floor.position.z + (Math.random() - 0.5) * (CHUNK_SIZE - 15);
+                addModel('baum.glb', bx, 0, bz, 1);
+            }
+
+            scene.add(chunkGroup);
+            loadedChunks.set(key, chunkGroup);
+        }
+
+        function updateChunks() {
+            const playerChunkX = Math.floor(camera.position.x / CHUNK_SIZE);
+            const playerChunkZ = Math.floor(camera.position.z / CHUNK_SIZE);
+
+            for (let x = -VIEW_DISTANCE; x <= VIEW_DISTANCE; x++) {
+                for (let z = -VIEW_DISTANCE; z <= VIEW_DISTANCE; z++) {
+                    queueChunkGeneration(playerChunkX + x, playerChunkZ + z);
+                }
+            }
+        }
+
+        // --- 4. CONFIG STEUERUNG ---
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let canJump = false;
+        
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let prevTime = performance.now();
+
+        blocker.addEventListener('click', () => { document.body.requestPointerLock(); });
+        document.addEventListener('pointerlockchange', () => {
+            blocker.style.display = document.pointerLockElement === document.body ? 'none' : 'flex';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement !== document.body) return;
+            camera.rotation.y -= e.movementX * 0.0022;
+            camera.rotation.x -= e.movementY * 0.0022;
+            camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+        });
+
+        const handleKey = (code, isDown) => {
+            switch (code) {
+                case 'KeyW': case 'ArrowUp': moveForward = isDown; break;
+                case 'KeyS': case 'ArrowDown': moveBackward = isDown; break;
+                case 'KeyA': case 'ArrowLeft': moveLeft = isDown; break;
+                case 'KeyD': case 'ArrowRight': moveRight = isDown; break;
+                case 'Space': if (isDown && canJump) { velocity.y += 280; canJump = false; } break;
+            }
+        };
+        document.addEventListener('keydown', (e) => handleKey(e.code, true));
+        document.addEventListener('keyup', (e) => handleKey(e.code, false));
+
+        camera.position.set(50, 1.8, 50); 
+        camera.rotation.order = 'YXZ'; 
+
+        // --- 5. PRÄZISE FPS-KOLLISIONSDETEKTION ---
+        function checkCollisions(predictedPosition) {
+            // Wir prüfen in die 4 horizontalen Bewegungsrichtungen auf Hüfthöhe (Y=1.0)
+            const collisionDirections = [
+                new THREE.Vector3(0, 0, -1), // Vorne
+                new THREE.Vector3(0, 0, 1),  // Hinten
+                new THREE.Vector3(-1, 0, 0), // Links
+                new THREE.Vector3(1, 0, 0)   // Rechts
+            ];
+            
+            const playerRadius = 0.8; // Wie nah darf der Spieler an Objekte ran
+            let origin = new THREE.Vector3(camera.position.x, 1.0, camera.position.z);
+
+            for (let dir of collisionDirections) {
+                // Richte die Test-Strahlen an der aktuellen Blickrichtung der Kamera aus
+                let absoluteDir = dir.clone().applyQuaternion(camera.quaternion);
+                absoluteDir.y = 0; // Nur horizontal testen
+                absoluteDir.normalize();
+
+                raycaster.set(origin, absoluteDir);
+                const intersections = raycaster.intersectObjects(collidables, true);
+
+                if (intersections.length > 0 && intersections[0].distance < playerRadius) {
+                    // Kollision erkannt! Bewegung in diese Richtung blockieren
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // --- 6. GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (document.pointerLockElement === document.body) {
+            const time = performance.now();const delta = (time - prevTime) / 1000;// Reibung / Dämpfungvelocity.x -= velocity.x * 10.0 * delta;velocity.z -= velocity.z * 10.0 * delta;velocity.y -= 9.8 * 85.0 * delta; // Schwerkraft-Gewichtungdirection.z = Number(moveForward) - Number(moveBackward);direction.x = Number(moveRight) - Number(moveLeft);direction.normalize();if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;// Vorübergehende Position berechnen (für den Kollisions-Check)const oldPosition = camera.position.clone();camera.translateX(-velocity.x * delta);camera.translateZ(velocity.z * delta);camera.position.y += velocity.y * delta;// Wenn Kollision mit einem Baum vorliegt: Setze X- und Z-Achse zurückif (checkCollisions(camera.position)) {camera.position.x = oldPosition.x;camera.position.z = oldPosition.z;velocity.x = 0;velocity.z = 0;}// Boden-Kollision (Gravitations-Stopp)if (camera.position.y < 1.8) {velocity.y = 0;camera.position.y = 1.8;canJump = true;}// Map-Grenzen (10.000 x 10.0000) einhaltencamera.position.x = Math.max(0, Math.min(WORLD_SIZE, camera.position.x));camera.position.z = Math.max(0, Math.min(WORLD_SIZE, camera.position.z));// Chunk-System UpdatesupdateChunks();processChunkQueue(); // Baut die Chunks flüssig nacheinander auf// UI aktualisierenui.innerHTML = Koordinaten: X: ${Math.floor(camera.position.x)} | Y: ${Math.floor(camera.position.y)} | Z: ${Math.floor(camera.position.z)}<br>Geladene Chunks: ${loadedChunks.size}<br>In Warteschlange: ${chunkQueue.length};prevTime = time;}renderer.render(scene, camera);}window.addEventListener('resize', () => {camera.aspect = window.innerWidth / window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth, window.innerHeight);});// Startanimate();
