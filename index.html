@@ -2,14 +2,13 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>FPS GLB WORLD</title>
+<title>CHUNK FOG WORLD</title>
 
 <style>
-body { margin:0; overflow:hidden; background:#87cfff; }
-
+body { margin:0; overflow:hidden; }
 #hud{
   position:absolute;
-  bottom:10px;
+  top:10px;
   left:10px;
   color:white;
   font-family:Arial;
@@ -20,9 +19,8 @@ body { margin:0; overflow:hidden; background:#87cfff; }
 </head>
 <body>
 
-<div id="hud">CLICK TO PLAY (WASD + SPACE)</div>
+<div id="hud">CHUNK WORLD + FOG + COORD TREES</div>
 
-<!-- THREE + LOADER -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 
@@ -32,8 +30,11 @@ body { margin:0; overflow:hidden; background:#87cfff; }
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87cfff);
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 5000);
-const renderer = new THREE.WebGLRenderer({antialias:true});
+// 🌫️ NEBEL (WICHTIG!)
+scene.fog = new THREE.Fog(0x87cfff, 20, 120);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer();
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -45,116 +46,117 @@ const keys = {};
 addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
 addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
 
-// ================= PLAYER =================
-let velY = 0;
-let onGround = true;
-
-// ================= GLB SYSTEM (CACHE) =================
+// ================= GLB =================
 const loader = new THREE.GLTFLoader();
-
 let treeModel = null;
-let ready = false;
-let queue = [];
 
-// LOAD ONCE
-loader.load("./baum.glb",
-
-(gltf)=>{
-  treeModel = gltf.scene;
-  ready = true;
-
-  console.log("✅ Baum geladen");
-
-  // queued trees spawn
-  queue.forEach(t=>{
-    spawnTree(t.x,t.y,t.z);
-  });
-
-  queue = [];
-},
-
-undefined,
-
-(err)=>{
-  console.error("❌ GLB ERROR:", err);
+loader.load("./baum.glb",(gltf)=>{
+treeModel = gltf.scene;
 });
 
-// ================= SPAWN TREE (NO RELOAD) =================
-function spawnTree(x,y,z){
+// ================= CHUNKS =================
+const chunkSize = 50;
+const chunks = new Map();
 
-if(!ready){
-queue.push({x,y,z});
-return;
+function createChunk(cx, cz){
+
+const key = cx+","+cz;
+if(chunks.has(key)) return;
+
+const group = new THREE.Group();
+
+// ground
+const ground = new THREE.Mesh(
+new THREE.PlaneGeometry(chunkSize,chunkSize),
+new THREE.MeshStandardMaterial({color:0x228b22})
+);
+ground.rotation.x = -Math.PI/2;
+group.add(ground);
+
+// load trees for THIS chunk
+loadTreesForChunk(group, cx, cz);
+
+scene.add(group);
+chunks.set(key, group);
 }
 
-const tree = treeModel.clone(); // 🔥 CACHE COPY
+// ================= TREE COORDINATE SYSTEM =================
 
-tree.position.set(x,y,z);
+// 👉 HIER KOMMEN DEINE BÄUME REIN
+const treeCoords = [
+{ x: 10, z: 10 },
+{ x: 15, z: -20 },
+{ x: -5, z: 30 },
+{ x: 0, z: 0 }
+];
+
+// ================= TREE SPAWNER =================
+function loadTreesForChunk(group, cx, cz){
+
+if(!treeModel) return;
+
+for(const t of treeCoords){
+
+// nur Bäume im aktuellen Chunk anzeigen
+const inChunkX = Math.floor(t.x / chunkSize) === cx;
+const inChunkZ = Math.floor(t.z / chunkSize) === cz;
+
+if(inChunkX && inChunkZ){
+
+const tree = treeModel.clone();
+
+tree.position.set(t.x, 0, t.z);
 tree.scale.set(1,1,1);
 
-scene.add(tree);
+group.add(tree);
 }
 
-// ================= WORLD =================
-for(let i=0;i<200;i++){
-spawnTree(
-(Math.random()-0.5)*200,
--1,
-(Math.random()-0.5)*200
-);
+}
+}
+
+// ================= CHUNK UPDATE =================
+function updateChunks(){
+
+const cx = Math.floor(camera.position.x / chunkSize);
+const cz = Math.floor(camera.position.z / chunkSize);
+
+// nur aktueller Chunk + Umgebung
+for(let x=-1;x<=1;x++){
+for(let z=-1;z<=1;z++){
+createChunk(cx+x, cz+z);
+}
+}
+
 }
 
 // ================= MOVE =================
 function move(){
-const speed = 0.25;
+
+const speed = 0.3;
 
 if(keys["w"]) camera.position.z -= speed;
 if(keys["s"]) camera.position.z += speed;
 if(keys["a"]) camera.position.x -= speed;
 if(keys["d"]) camera.position.x += speed;
-}
 
-// ================= GRAVITY =================
-function gravity(){
-velY -= 0.02;
-camera.position.y += velY;
-
-if(camera.position.y < 2){
-camera.position.y = 2;
-velY = 0;
-onGround = true;
 }
-}
-
-addEventListener("keydown",(e)=>{
-if(e.code==="Space" && onGround){
-velY = 0.35;
-onGround = false;
-}
-});
-
-// ================= CLICK START =================
-document.body.addEventListener("click",()=>{
-document.body.requestPointerLock();
-});
 
 // ================= LOOP =================
 function animate(){
 requestAnimationFrame(animate);
 
 move();
-gravity();
+updateChunks();
 
 renderer.render(scene,camera);
 }
 
 animate();
 
-// RESIZE
 addEventListener("resize",()=>{
-camera.aspect = innerWidth/innerHeight;
+camera.aspect=innerWidth/innerHeight;
 camera.updateProjectionMatrix();
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(innerWidth,innerHeight);
 });
 
 </script>
