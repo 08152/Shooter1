@@ -1,278 +1,145 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-<meta charset="UTF-8" />
-<title>FPS Infinite World FIX</title>
-
+<meta charset="UTF-8">
+<title>FPS World FIX</title>
 <style>
-body { margin:0; overflow:hidden; background:#87ceeb; }
-#hud {
+body { margin:0; overflow:hidden; }
+#info {
   position:absolute;
   top:10px;
   left:10px;
   color:white;
   font-family:Arial;
-  font-size:14px;
-  background:rgba(0,0,0,0.4);
-  padding:10px;
-  border-radius:8px;
-  z-index:10;
 }
-#center {
-  position:absolute;
-  top:50%;
-  left:50%;
-  width:6px;
-  height:6px;
-  background:white;
-  transform:translate(-50%,-50%);
-  border-radius:50%;
-  z-index:10;
-}
-canvas { display:block; }
 </style>
 </head>
-
 <body>
 
-<div id="hud">Loading...</div>
-<div id="center"></div>
+<div id="info">CLICK + WASD + SPACE</div>
 
-<script type="module">
+<!-- ✅ THREE.JS (NON-MODULE, STABIL) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.161/build/three.min.js"></script>
 
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.161/build/three.module.js";
-import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.161/examples/jsm/loaders/GLTFLoader.js";
-
-/* ---------------- SCENE ---------------- */
+<script>
+// ---------- BASIC ----------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-
-const sun = new THREE.DirectionalLight(0xffffff, 1);
-sun.position.set(50,100,20);
-scene.add(sun);
-
-/* CAMERA */
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
-camera.position.set(0, 10, 0);
+camera.position.y = 5;
 
-/* RENDERER */
-const renderer = new THREE.WebGLRenderer({ antialias:true });
+const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
-/* HUD */
-const hud = document.getElementById("hud");
+// ---------- LIGHT ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
 
-/* ---------------- PLAYER ---------------- */
-let velocityY = 0;
-let canJump = false;
-
+// ---------- SIMPLE CONTROLS (NO POINTERLOCK FOR STABILITY) ----------
 const keys = {};
-document.addEventListener("keydown", e => keys[e.code]=true);
-document.addEventListener("keyup", e => keys[e.code]=false);
+addEventListener("keydown", e => keys[e.code]=true);
+addEventListener("keyup", e => keys[e.code]=false);
 
-/* MOUSE LOOK */
-let rotX = 0, rotY = 0;
+// click to start movement lock
+let active = false;
+document.body.addEventListener("click", ()=> active = true);
 
-document.body.addEventListener("click", () => {
-  document.body.requestPointerLock();
-});
+// ---------- NOISE TERRAIN ----------
+function noise(x,z){
+  return (Math.sin(x*0.05)+Math.cos(z*0.05))*2;
+}
 
-document.addEventListener("mousemove", e => {
-  if(document.pointerLockElement === document.body){
-    rotY -= e.movementX * 0.002;
-    rotX -= e.movementY * 0.002;
-    rotX = Math.max(-1.5, Math.min(1.5, rotX));
-  }
-});
+// ---------- GROUND ----------
+const geo = new THREE.PlaneGeometry(500,500,50,50);
+geo.rotateX(-Math.PI/2);
 
-/* ---------------- WORLD ---------------- */
-const CHUNK_SIZE = 50;
-const RENDER_DISTANCE = 2;
-const chunks = {};
+const pos = geo.attributes.position;
+for(let i=0;i<pos.count;i++){
+  const x = pos.getX(i);
+  const z = pos.getZ(i);
+  pos.setY(i, noise(x,z));
+}
+geo.computeVertexNormals();
 
-/* HEIGHT */
-function getHeight(x,z){
-  return (
-    Math.sin(x*0.05)*2 +
-    Math.cos(z*0.05)*2 +
-    Math.sin((x+z)*0.02)*3
+const ground = new THREE.Mesh(
+  geo,
+  new THREE.MeshStandardMaterial({color:0x228b22})
+);
+
+scene.add(ground);
+
+// ---------- TREES ----------
+function tree(x,z){
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.3,0.5,3),
+    new THREE.MeshStandardMaterial({color:0x8b5a2b})
+  );
+  trunk.position.set(x,2,z);
+
+  const leaves = new THREE.Mesh(
+    new THREE.SphereGeometry(1.5,8,8),
+    new THREE.MeshStandardMaterial({color:0x0a7a2f})
+  );
+  leaves.position.set(x,4,z);
+
+  scene.add(trunk);
+  scene.add(leaves);
+}
+
+for(let i=0;i<150;i++){
+  tree(
+    (Math.random()-0.5)*200,
+    (Math.random()-0.5)*200
   );
 }
 
-/* GROUND */
-function createGround(x,z){
-  const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, 20, 20);
-
-  for(let i=0;i<geo.attributes.position.count;i++){
-    const vx = geo.attributes.position.getX(i) + x;
-    const vz = geo.attributes.position.getZ(i) + z;
-    const vy = getHeight(vx,vz);
-    geo.attributes.position.setY(i, vy);
-  }
-
-  geo.computeVertexNormals();
-
-  const mat = new THREE.MeshLambertMaterial({ color:0x2ecc71 });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = -Math.PI/2;
-  mesh.position.set(x,0,z);
-
-  return mesh;
-}
-
-/* ---------------- TREES ---------------- */
-let treeModel = null;
-
-const loader = new GLTFLoader();
-
-/* pending system */
-const pendingTrees = {};
-
-/* GLB LOAD */
-loader.load(
-  "baum.glb",
-  (gltf) => {
-    console.log("GLB LOADED");
-    treeModel = gltf.scene;
-
-    // 🔥 alles nachladen
-    for(const key in pendingTrees){
-      const group = chunks[key];
-      if(!group) continue;
-
-      pendingTrees[key].forEach(t => {
-        const tree = treeModel.clone();
-        tree.position.set(t.x,t.y,t.z);
-        tree.scale.set(2,2,2);
-        group.add(tree);
-      });
-    }
-
-    pendingTrees = {};
-  },
-  undefined,
-  (err) => {
-    console.error("GLB ERROR:", err);
-    hud.innerHTML = "GLB ERROR ❌";
-  }
-);
-
-/* ---------------- CHUNKS ---------------- */
-function createChunk(cx,cz){
-  const key = cx+","+cz;
-  if(chunks[key]) return;
-
-  const group = new THREE.Group();
-  chunks[key] = group;
-
-  const worldX = cx * CHUNK_SIZE;
-  const worldZ = cz * CHUNK_SIZE;
-
-  group.add(createGround(worldX,worldZ));
-
-  for(let i=0;i<6;i++){
-    const x = worldX + (Math.random()-0.5)*CHUNK_SIZE;
-    const z = worldZ + (Math.random()-0.5)*CHUNK_SIZE;
-    const y = getHeight(x,z);
-
-    if(treeModel){
-      const tree = treeModel.clone();
-      tree.position.set(x,y,z);
-      tree.scale.set(2,2,2);
-      group.add(tree);
-    } else {
-      if(!pendingTrees[key]) pendingTrees[key] = [];
-      pendingTrees[key].push({x,y,z});
-    }
-  }
-
-  scene.add(group);
-}
-
-/* UPDATE */
-function updateChunks(px,pz){
-  const cx = Math.floor(px/CHUNK_SIZE);
-  const cz = Math.floor(pz/CHUNK_SIZE);
-
-  for(let x=-RENDER_DISTANCE;x<=RENDER_DISTANCE;x++){
-    for(let z=-RENDER_DISTANCE;z<=RENDER_DISTANCE;z++){
-      createChunk(cx+x,cz+z);
-    }
-  }
-}
-
-/* ---------------- LOOP ---------------- */
-let velocityY = 0;
+// ---------- PLAYER PHYSICS ----------
+let velY = 0;
 let canJump = false;
 
-let fps=0, frames=0, last=performance.now();
-
+// ---------- LOOP ----------
 function animate(){
   requestAnimationFrame(animate);
 
-  const now = performance.now();
-  frames++;
-  if(now-last>=1000){
-    fps=frames;
-    frames=0;
-    last=now;
+  if(active){
+    const speed = 0.4;
+
+    if(keys["KeyW"]) camera.position.z -= speed;
+    if(keys["KeyS"]) camera.position.z += speed;
+    if(keys["KeyA"]) camera.position.x -= speed;
+    if(keys["KeyD"]) camera.position.x += speed;
   }
 
-  const speed = 0.3;
+  // gravity
+  velY -= 0.02;
+  camera.position.y += velY;
 
-  const forward = keys["KeyW"]?1:0;
-  const back = keys["KeyS"]?1:0;
-  const left = keys["KeyA"]?1:0;
-  const right = keys["KeyD"]?1:0;
+  const g = noise(camera.position.x, camera.position.z) + 3;
 
-  const dirX = Math.sin(rotY);
-  const dirZ = Math.cos(rotY);
-
-  camera.position.x += (dirX*(forward-back) + Math.cos(rotY)*(right-left)) * speed;
-  camera.position.z += (dirZ*(forward-back) - Math.sin(rotY)*(right-left)) * speed;
-
-  /* GRAVITY */
-  const groundY = getHeight(camera.position.x,camera.position.z) + 2;
-
-  velocityY -= 0.01;
-  camera.position.y += velocityY;
-
-  if(camera.position.y < groundY){
-    camera.position.y = groundY;
-    velocityY = 0;
+  if(camera.position.y < g){
+    camera.position.y = g;
+    velY = 0;
     canJump = true;
   }
 
   if(keys["Space"] && canJump){
-    velocityY = 0.25;
+    velY = 0.4;
     canJump = false;
   }
 
-  camera.rotation.set(rotX,rotY,0);
-
-  updateChunks(camera.position.x,camera.position.z);
-
-  hud.innerHTML =
-    `FPS: ${fps}<br>`+
-    `X: ${camera.position.x.toFixed(1)}<br>`+
-    `Y: ${camera.position.y.toFixed(1)}<br>`+
-    `Z: ${camera.position.z.toFixed(1)}`;
-
-  renderer.render(scene,camera);
+  renderer.render(scene, camera);
 }
 
 animate();
 
-/* resize */
-window.addEventListener("resize",()=>{
+// resize
+addEventListener("resize", ()=>{
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
+  renderer.setSize(innerWidth, innerHeight);
 });
-
 </script>
+
 </body>
 </html>
