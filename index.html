@@ -2,182 +2,297 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>10k Chunk World</title>
-
+<title>FULL FPS SYSTEM - 10K WORLD</title>
 <style>
-body { margin:0; overflow:hidden; }
-#hud{
-  position:absolute;
-  top:10px;
-  left:10px;
-  color:white;
-  font-family:Arial;
-  background:rgba(0,0,0,0.4);
-  padding:6px;
+body { margin:0; overflow:hidden; background:#87cfff; select:none; }
+#crosshair {
+position:absolute; top:50%; left:50%; width:10px; height:10px;
+transform:translate(-50%,-50%); z-index:10;
 }
+#crosshair:before, #crosshair:after { content:""; position:absolute; background:white; }
+#crosshair:before { width:2px; height:10px; left:4px; }
+#crosshair:after { width:10px; height:2px; top:4px; }
+
+#coords {
+position:absolute; bottom:10px; right:10px; color:white;
+font-family:Arial, sans-serif; font-size:13px; background:rgba(0,0,0,0.4);
+padding:6px; border-radius:6px; white-space:pre; z-index:10;
+}
+
+#healthBar {
+position:absolute; bottom:10px; left:10px; width:220px; height:18px;
+border:2px solid white; background:rgba(0,0,0,0.3); z-index:10;
+}
+#healthFill { width:100%; height:100%; background:#1e90ff; }
 </style>
 </head>
 <body>
-
-<div id="hud">10K WORLD + CHUNKS + NO LAG</div>
+<div id="crosshair"></div>
+<div id="coords"></div>
+<div id="healthBar"><div id="healthFill"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 
 <script>
-
-// ================= WORLD SIZE =================
+// ================= CONFIG & WORLD GENERATION =================
 const WORLD_SIZE = 10000;
-const chunkSize = 100;
-const halfWorld = WORLD_SIZE / 2;
+const CHUNK_SIZE = 250;
+const VIEW_DISTANCE = 3; // Chunks in jede Richtung sichtbar
+const TREES_PER_CHUNK = 15;
 
-// ================= SCENE =================
+// Generiere feste, reproduzierbare Baum-Koordinaten für die gesamte 10k-Welt
+const treePositions = {};
+function getChunkKey(cx, cz) { return `${cx},${cz}`; }
+
+function generateWorldData() {
+    const halfSize = WORLD_SIZE / 2;
+    const minChunk = -halfSize / CHUNK_SIZE;
+    const maxChunk = halfSize / CHUNK_SIZE;
+
+    for(let cx = minChunk; cx < maxChunk; cx++) {
+        for(let cz = minChunk; cz < maxChunk; cz++) {
+            const key = getChunkKey(cx, cz);
+            const seeds = [];
+            // Feste Zufallspositionen pro Chunk generieren
+            for(let i = 0; i < TREES_PER_CHUNK; i++) {
+                // Pseudo-Zufall basierend auf Chunk-Koordinaten
+                const rx = Math.abs(Math.sin(cx * 12.9898 + cz * 78.233 + i)) * CHUNK_SIZE;
+                const rz = Math.abs(Math.cos(cx * 4.1414 + cz * 45.123 + i)) * CHUNK_SIZE;
+                seeds.push({
+                    x: cx * CHUNK_SIZE + rx,
+                    z: cz * CHUNK_SIZE + rz
+                });
+            }
+            treePositions[key] = seeds;
+        }
+    }
+}
+generateWorldData();
+
+// ================= SCENE SETUP =================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87cfff);
-scene.fog = new THREE.Fog(0x87cfff, 50, 400);
+scene.fog = new THREE.FogExp2(0x87cfff, 0.005); // Perfekter Nebel-Übergang
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 3000);
-camera.position.y = 3;
-
-const renderer = new THREE.WebGLRenderer({ antialias:false });
-renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(1);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// LIGHT
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
+// LIGHTS
+scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(100, 200, 100);
+scene.add(sun);
 
-// ================= TEXTURE =================
-const tex = new THREE.TextureLoader().load(
-"https://threejs.org/examples/textures/terrain/grasslight-big.jpg"
-);
+// ================= RIESIGER BODEN =================
+const tex = new THREE.TextureLoader().load("https://threejs.org/examples/textures/terrain/grasslight-big.jpg");
 tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-tex.repeat.set(2,2);
+tex.repeat.set(500, 500); // Skaliert für die 10k Welt
 
-// ================= INPUT =================
-const keys = {};
-addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
-addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
-
-// ================= GLB =================
-const loader = new THREE.GLTFLoader();
-let treeModel = null;
-
-loader.load("./baum.glb",(gltf)=>{
-treeModel = gltf.scene;
-});
-
-// ================= TREES (EINFACH HIER EDITIEREN) =================
-// 👉 HIER 1 ZEILE PRO BAUM
-const treeCoords = [
-  {x: 100, z: 100},
-  {x: -300, z: 200},
-  {x: 500, z: -400}
-];
-
-// ================= CHUNKS =================
-const chunks = new Map();
-const renderDistance = 1;
-
-// ================= CREATE TREE FUNCTION =================
-function spawnTree(x,z){
-if(!treeModel) return;
-const t = treeModel.clone();
-t.position.set(x,0,z);
-t.scale.set(1,1,1);
-return t;
-}
-
-// ================= CHUNK =================
-function createChunk(cx, cz){
-
-const key = cx+","+cz;
-if(chunks.has(key)) return;
-
-// WORLD LIMIT CHECK (10k border)
-const worldLimit = WORLD_SIZE / (2 * chunkSize);
-if(Math.abs(cx) > worldLimit || Math.abs(cz) > worldLimit) return;
-
-const group = new THREE.Group();
-
-// ground
 const ground = new THREE.Mesh(
-new THREE.PlaneGeometry(chunkSize, chunkSize),
-new THREE.MeshBasicMaterial({ map: tex })
+    new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE),
+    new THREE.MeshStandardMaterial({ map: tex })
 );
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
 
-ground.rotation.x = -Math.PI/2;
-group.add(ground);
+// ================= PLAYER SYSTEM =================
+const player = new THREE.Object3D();
+player.position.set(0, 0, 0);
+scene.add(player);
+player.add(camera);
+camera.position.set(0, 2.2, 0);
 
-// trees ONLY inside chunk
-for(const t of treeCoords){
-const tx = Math.floor(t.x / chunkSize);
-const tz = Math.floor(t.z / chunkSize);
+let yaw = 0, pitch = 0;
+let velY = 0, onGround = true;
+const keys = {};
 
-if(tx === cx && tz === cz){
-group.add(spawnTree(t.x, t.z));
-}
-}
+window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
 
-scene.add(group);
-chunks.set(key, group);
-}
-
-// ================= CLEANUP =================
-function cleanup(cx, cz){
-for(const [key,chunk] of chunks){
-const [x,z] = key.split(",").map(Number);
-
-if(Math.abs(x-cx)>renderDistance || Math.abs(z-cz)>renderDistance){
-scene.remove(chunk);
-chunks.delete(key);
-}
-}
-}
-
-// ================= UPDATE =================
-function updateChunks(){
-
-const cx = Math.floor(camera.position.x / chunkSize);
-const cz = Math.floor(camera.position.z / chunkSize);
-
-for(let x=-renderDistance;x<=renderDistance;x++){
-for(let z=-renderDistance;z<=renderDistance;z++){
-createChunk(cx+x, cz+z);
-}
-}
-
-cleanup(cx, cz);
-}
-
-// ================= MOVE =================
-function move(){
-const speed = 5;
-
-if(keys["w"]) camera.position.z -= speed;
-if(keys["s"]) camera.position.z += speed;
-if(keys["a"]) camera.position.x -= speed;
-if(keys["d"]) camera.position.x += speed;
-}
-
-// ================= LOOP =================
-function animate(){
-requestAnimationFrame(animate);
-
-move();
-updateChunks();
-
-renderer.render(scene,camera);
-}
-
-animate();
-
-addEventListener("resize",()=>{
-camera.aspect = innerWidth/innerHeight;
-camera.updateProjectionMatrix();
-renderer.setSize(innerWidth,innerHeight);
+document.addEventListener("mousemove", (e) => {
+    if (document.pointerLockElement !== document.body) return;
+    yaw -= e.movementX * 0.002;
+    pitch -= e.movementY * 0.002;
+    pitch = Math.max(-1.2, Math.min(1.2, pitch));
+    player.rotation.y = yaw;
+    camera.rotation.x = pitch;
 });
 
-</script>
-</body>
-</html>
+document.body.addEventListener("click", () => document.body.requestPointerLock());
+
+window.addEventListener("keydown", (e) => {
+    if (e.code === "Space" && onGround) {
+        velY = 0.25;
+        onGround = false;
+    }
+});
+
+// ================= CHUNK ENGINE & GLB ASSET LOADER =================
+const gltfLoader = new THREE.GLTFLoader();
+let masterTreeGeometry = null;
+let masterTreeMaterial = null;
+const activeChunks = {}; // Speichert geladene InstancedMeshes
+let collidables = []; // Dynamische Kollisionsboxen
+
+// Lade baum.glb als Master-Referenz für hocheffizientes Instancing
+gltfLoader.load("baum.glb", (gltf) => {
+    gltf.scene.traverse((child) => {
+        if (child.isMesh) {
+            masterTreeGeometry = child.geometry;
+            masterTreeMaterial = child.material;
+        }
+    });
+    // Erste Chunk-Prüfung nach Asset-Load triggern
+    updateChunks();
+}, undefined, (error) => {
+    console.warn("Konnte baum.glb nicht laden. Nutze Ersatz-Geometrie.");
+    masterTreeGeometry = new THREE.CylinderGeometry(0.2, 0.8, 5, 8);
+    masterTreeMaterial = new THREE.MeshStandardMaterial({ color: 0x557a46 });
+    updateChunks();
+});
+
+function updateChunks() {
+    if (!masterTreeGeometry) return;
+
+    const playerChunkX = Math.floor(player.position.x / CHUNK_SIZE);
+    const playerChunkZ = Math.floor(player.position.z / CHUNK_SIZE);
+    const currentFrameChunks = {};
+
+    // Sichtbare Chunks laden / halten
+    for (let x = -VIEW_DISTANCE; x <= VIEW_DISTANCE; x++) {
+        for (let z = -VIEW_DISTANCE; z <= VIEW_DISTANCE; z++) {
+            const cx = playerChunkX + x;
+            const cz = playerChunkZ + z;
+            const key = getChunkKey(cx, cz);
+            
+            if (treePositions[key]) {
+                currentFrameChunks[key] = true;
+                if (!activeChunks[key]) {
+                    loadChunkInstanced(cx, cz, key);
+                }
+            }
+        }
+    }
+
+    // Nicht mehr sichtbare Chunks entladen (Lag-Schutz!)
+    for (let key in activeChunks) {
+        if (!currentFrameChunks[key]) {
+            scene.remove(activeChunks[key].mesh);
+            activeChunks[key].mesh.dispose();
+            delete activeChunks[key];
+        }
+    }
+
+    // Kollisions-Array neu aufbauen aus allen aktiven Chunks
+    rebuildCollidables();
+}
+
+function loadChunkInstanced(cx, cz, key) {
+    const positions = treePositions[key];
+    // Ein einzelnes InstancedMesh zeichnet alle Bäume des Chunks auf einmal!
+    const instancedMesh = new THREE.InstancedMesh(masterTreeGeometry, masterTreeMaterial, positions.length);
+    const dummy = new THREE.Object3D();
+    const chunkBoxes = [];
+
+    positions.forEach((pos, index) => {
+        dummy.position.set(pos.x, 0, pos.z);
+        dummy.scale.set(1.5, 1.5, 1.5);
+        dummy.updateMatrix();
+        instancedMesh.setMatrixAt(index, dummy.matrix);
+
+        // Erstelle reduzierte Hitbox für jeden Baum im Chunk
+        const box = new THREE.Box3().setFromCenterAndSize(
+            new THREE.Vector3(pos.x, 2.5, pos.z),
+            new THREE.Vector3(1.2, 5.0, 1.2) // 50% schmaler für besseres Gameplay
+        );
+        chunkBoxes.push(box);
+    });
+
+    instancedMesh.instanceMatrix.needsUpdate = true;
+    scene.add(instancedMesh);
+    activeChunks[key] = { mesh: instancedMesh, boxes: chunkBoxes };
+}
+
+function rebuildCollidables() {
+    collidables = [];
+    for (let key in activeChunks) {
+        collidables.push(...activeChunks[key].boxes);
+    }
+}
+
+// ================= PHYSICS & MOVEMENT =================
+function getPlayerBox(pos) {
+    return new THREE.Box3().setFromCenterAndSize(
+        new THREE.Vector3(pos.x, pos.y + 1, pos.z),
+        new THREE.Vector3(0.8, 1.8, 0.8)
+    );
+}
+
+function handlePhysicsAndMove() {
+    // Schwerkraft
+    velY -= 0.012;
+    player.position.y += velY;
+    if (player.position.y <= 0) {
+        player.position.y = 0;
+        velY = 0;
+        onGround = true;
+    }
+
+    // Bewegung berechnen
+    const speed = 0.25;
+    let dir = new THREE.Vector3();
+    if (keys["w"]) dir.z -= 1;
+    if (keys["s"]) dir.z += 1;
+    if (keys["a"]) dir.x -= 1;
+    if (keys["d"]) dir.x += 1;
+    dir.normalize();
+
+    const forward = new THREE.Vector3(0, 0, -1).applyEuler(player.rotation);
+    forward.y = 0; forward.normalize();
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).negate();
+
+    const moveVector = new THREE.Vector3();
+    moveVector.addScaledVector(forward, dir.z * speed);
+    moveVector.addScaledVector(right, dir.x * speed);
+
+    // Kollisionsprüfung vor Bewegungsausführung
+    const nextPosition = player.position.clone().add(moveVector);
+    const playerBox = getPlayerBox(nextPosition);
+    let blocked = false;
+
+    for (let box of collidables) {
+        if (playerBox.intersectsBox(box)) {
+            blocked = true;
+            break;
+        }
+    }
+
+    if (!blocked) {
+        player.position.copy(nextPosition);
+    }
+}
+
+// ================= UI UPDATE =================
+const coordsDiv = document.getElementById("coords");
+function updateUI() {
+    coordsDiv.innerText = `X: ${player.position.x.toFixed(1)}\nY: ${player.position.y.toFixed(1)}\nZ: ${player.position.z.toFixed(1)}\nChunks aktiv: ${Object.keys(activeChunks).length}`;
+}
+
+// ================= ENGINE GAME LOOP =================
+let lastChunkUpdate = 0;
+
+function animate(time) {
+    requestAnimationFrame(animate);
+
+    handlePhysicsAndMove();
+
+    // Chunks alle 200ms prüfen statt jeden Frame (Spart extrem viel CPU)
+    if (time - lastChunkUpdate > 200) {
+        updateChunks();
+        lastChunkUpdate = time;
+    }
+
+    updateUI();
