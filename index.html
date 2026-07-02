@@ -218,4 +218,65 @@
             requestAnimationFrame(animate);
 
             if (document.pointerLockElement === document.body) {
-            const time = performance.now();const delta = (time - prevTime) / 1000;// Reibung / Dämpfungvelocity.x -= velocity.x * 10.0 * delta;velocity.z -= velocity.z * 10.0 * delta;velocity.y -= 9.8 * 85.0 * delta; // Schwerkraft-Gewichtungdirection.z = Number(moveForward) - Number(moveBackward);direction.x = Number(moveRight) - Number(moveLeft);direction.normalize();if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;// Vorübergehende Position berechnen (für den Kollisions-Check)const oldPosition = camera.position.clone();camera.translateX(-velocity.x * delta);camera.translateZ(velocity.z * delta);camera.position.y += velocity.y * delta;// Wenn Kollision mit einem Baum vorliegt: Setze X- und Z-Achse zurückif (checkCollisions(camera.position)) {camera.position.x = oldPosition.x;camera.position.z = oldPosition.z;velocity.x = 0;velocity.z = 0;}// Boden-Kollision (Gravitations-Stopp)if (camera.position.y < 1.8) {velocity.y = 0;camera.position.y = 1.8;canJump = true;}// Map-Grenzen (10.000 x 10.0000) einhaltencamera.position.x = Math.max(0, Math.min(WORLD_SIZE, camera.position.x));camera.position.z = Math.max(0, Math.min(WORLD_SIZE, camera.position.z));// Chunk-System UpdatesupdateChunks();processChunkQueue(); // Baut die Chunks flüssig nacheinander auf// UI aktualisierenui.innerHTML = Koordinaten: X: ${Math.floor(camera.position.x)} | Y: ${Math.floor(camera.position.y)} | Z: ${Math.floor(camera.position.z)}<br>Geladene Chunks: ${loadedChunks.size}<br>In Warteschlange: ${chunkQueue.length};prevTime = time;}renderer.render(scene, camera);}window.addEventListener('resize', () => {camera.aspect = window.innerWidth / window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth, window.innerHeight);});// Startanimate();
+            const time = performance.now();
+const delta = (time - prevTime) / 1000;
+
+// Reibung / Dämpfung
+velocity.x -= velocity.x * 10.0 * delta;
+velocity.z -= velocity.z * 10.0 * delta;
+velocity.y -= 9.8 * 85.0 * delta; // Schwerkraft-Gewichtung
+
+direction.z = Number(moveForward) - Number(moveBackward);
+direction.x = Number(moveRight) - Number(moveLeft);
+direction.normalize();
+
+if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+// Vorübergehende Position berechnen (für den Kollisions-Check)
+const oldPosition = camera.position.clone();
+
+camera.translateX(-velocity.x * delta);
+camera.translateZ(velocity.z * delta);
+camera.position.y += velocity.y * delta;
+
+// Wenn Kollision mit einem Baum vorliegt: Setze X- und Z-Achse zurück
+if (checkCollisions(camera.position)) {
+camera.position.x = oldPosition.x;
+camera.position.z = oldPosition.z;
+velocity.x = 0;
+velocity.z = 0;
+}
+
+// Boden-Kollision (Gravitations-Stopp)
+if (camera.position.y < 1.8) {
+velocity.y = 0;
+camera.position.y = 1.8;
+canJump = true;
+}
+
+// Map-Grenzen (10.000 x 10.0000) einhalten
+camera.position.x = Math.max(0, Math.min(WORLD_SIZE, camera.position.x));
+camera.position.z = Math.max(0, Math.min(WORLD_SIZE, camera.position.z));
+
+// Chunk-System Updates
+updateChunks();
+processChunkQueue(); // Baut die Chunks flüssig nacheinander auf
+
+// UI aktualisieren
+ui.innerHTML = Koordinaten: X: ${Math.floor(camera.position.x)} | Y: ${Math.floor(camera.position.y)} | Z: ${Math.floor(camera.position.z)}<br>Geladene Chunks: ${loadedChunks.size}<br>In Warteschlange: ${chunkQueue.length};
+
+prevTime = time;
+}
+
+renderer.render(scene, camera);
+} [1]
+
+window.addEventListener('resize', () => {
+camera.aspect = window.innerWidth / window.innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Start
+animate();
