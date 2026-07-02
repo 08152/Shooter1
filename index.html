@@ -2,7 +2,8 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>FPS World FIX</title>
+<title>Infinite Chunk World</title>
+
 <style>
 body { margin:0; overflow:hidden; }
 #info {
@@ -11,114 +12,139 @@ body { margin:0; overflow:hidden; }
   left:10px;
   color:white;
   font-family:Arial;
+  font-size:14px;
 }
 </style>
 </head>
+
 <body>
+<div id="info">WASD + SPACE | Infinite Chunks</div>
 
-<div id="info">CLICK + WASD + SPACE</div>
-
-<!-- ✅ THREE.JS (NON-MODULE, STABIL) -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.161/build/three.min.js"></script>
 
 <script>
-// ---------- BASIC ----------
+// ================= SCENE =================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
-camera.position.y = 5;
+camera.position.y = 10;
 
-const renderer = new THREE.WebGLRenderer({antialias:true});
+const renderer = new THREE.WebGLRenderer({ antialias:true });
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// ---------- LIGHT ----------
+// LIGHT
 scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
 
-// ---------- SIMPLE CONTROLS (NO POINTERLOCK FOR STABILITY) ----------
+// ================= INPUT =================
 const keys = {};
 addEventListener("keydown", e => keys[e.code]=true);
 addEventListener("keyup", e => keys[e.code]=false);
 
-// click to start movement lock
-let active = false;
-document.body.addEventListener("click", ()=> active = true);
+// ================= PHYSICS =================
+let velY = 0;
+let canJump = false;
 
-// ---------- NOISE TERRAIN ----------
+// ================= TERRAIN NOISE =================
 function noise(x,z){
-  return (Math.sin(x*0.05)+Math.cos(z*0.05))*2;
+  return (Math.sin(x*0.08)+Math.cos(z*0.08))*2;
 }
 
-// ---------- GROUND ----------
-const geo = new THREE.PlaneGeometry(500,500,50,50);
-geo.rotateX(-Math.PI/2);
+// ================= CHUNKS =================
+const chunkSize = 50;
+const chunks = new Map();
 
-const pos = geo.attributes.position;
-for(let i=0;i<pos.count;i++){
-  const x = pos.getX(i);
-  const z = pos.getZ(i);
-  pos.setY(i, noise(x,z));
-}
-geo.computeVertexNormals();
-
-const ground = new THREE.Mesh(
-  geo,
-  new THREE.MeshStandardMaterial({color:0x228b22})
-);
-
-scene.add(ground);
-
-// ---------- TREES ----------
-function tree(x,z){
+function makeTree(x,z,group){
   const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(0.3,0.5,3),
-    new THREE.MeshStandardMaterial({color:0x8b5a2b})
+    new THREE.MeshStandardMaterial({ color:0x8b5a2b })
   );
   trunk.position.set(x,2,z);
 
   const leaves = new THREE.Mesh(
     new THREE.SphereGeometry(1.5,8,8),
-    new THREE.MeshStandardMaterial({color:0x0a7a2f})
+    new THREE.MeshStandardMaterial({ color:0x0a7a2f })
   );
   leaves.position.set(x,4,z);
 
-  scene.add(trunk);
-  scene.add(leaves);
+  group.add(trunk);
+  group.add(leaves);
 }
 
-for(let i=0;i<150;i++){
-  tree(
-    (Math.random()-0.5)*200,
-    (Math.random()-0.5)*200
+function createChunk(cx, cz){
+  const key = cx + "," + cz;
+  if(chunks.has(key)) return;
+
+  const group = new THREE.Group();
+
+  // ---- GROUND ----
+  const geo = new THREE.PlaneGeometry(chunkSize, chunkSize, 10, 10);
+  geo.rotateX(-Math.PI/2);
+
+  const pos = geo.attributes.position;
+
+  for(let i=0;i<pos.count;i++){
+    const x = pos.getX(i) + cx*chunkSize;
+    const z = pos.getZ(i) + cz*chunkSize;
+    pos.setY(i, noise(x,z));
+  }
+
+  geo.computeVertexNormals();
+
+  const ground = new THREE.Mesh(
+    geo,
+    new THREE.MeshStandardMaterial({ color:0x228b22 })
   );
+
+  group.add(ground);
+
+  // ---- TREES ----
+  for(let i=0;i<6;i++){
+    const x = cx*chunkSize + (Math.random()-0.5)*chunkSize;
+    const z = cz*chunkSize + (Math.random()-0.5)*chunkSize;
+    const y = noise(x,z);
+
+    makeTree(x,y,z,group);
+  }
+
+  scene.add(group);
+  chunks.set(key, group);
 }
 
-// ---------- PLAYER PHYSICS ----------
-let velY = 0;
-let canJump = false;
+// ================= UPDATE CHUNKS =================
+function updateChunks(){
+  const cx = Math.floor(camera.position.x / chunkSize);
+  const cz = Math.floor(camera.position.z / chunkSize);
 
-// ---------- LOOP ----------
+  for(let x=-1; x<=1; x++){
+    for(let z=-1; z<=1; z++){
+      createChunk(cx+x, cz+z);
+    }
+  }
+}
+
+// ================= LOOP =================
 function animate(){
   requestAnimationFrame(animate);
 
-  if(active){
-    const speed = 0.4;
+  updateChunks();
 
-    if(keys["KeyW"]) camera.position.z -= speed;
-    if(keys["KeyS"]) camera.position.z += speed;
-    if(keys["KeyA"]) camera.position.x -= speed;
-    if(keys["KeyD"]) camera.position.x += speed;
-  }
+  const speed = 0.3;
+
+  if(keys["KeyW"]) camera.position.z -= speed;
+  if(keys["KeyS"]) camera.position.z += speed;
+  if(keys["KeyA"]) camera.position.x -= speed;
+  if(keys["KeyD"]) camera.position.x += speed;
 
   // gravity
   velY -= 0.02;
   camera.position.y += velY;
 
-  const g = noise(camera.position.x, camera.position.z) + 3;
+  const groundY = noise(camera.position.x, camera.position.z) + 4;
 
-  if(camera.position.y < g){
-    camera.position.y = g;
+  if(camera.position.y < groundY){
+    camera.position.y = groundY;
     velY = 0;
     canJump = true;
   }
@@ -128,12 +154,12 @@ function animate(){
     canJump = false;
   }
 
-  renderer.render(scene, camera);
+  renderer.render(scene,camera);
 }
 
 animate();
 
-// resize
+// ================= RESIZE =================
 addEventListener("resize", ()=>{
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
