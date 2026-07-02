@@ -2,25 +2,10 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>FPS GLB OPTIMIZED</title>
+<title>FPS GLB WORLD</title>
 
 <style>
 body { margin:0; overflow:hidden; background:#87cfff; }
-
-#crosshair{
-  position:absolute;
-  top:50%;
-  left:50%;
-  width:10px;height:10px;
-  transform:translate(-50%,-50%);
-}
-#crosshair:before,#crosshair:after{
-  content:"";
-  position:absolute;
-  background:white;
-}
-#crosshair:before{width:2px;height:10px;left:4px;}
-#crosshair:after{width:10px;height:2px;top:4px;}
 
 #hud{
   position:absolute;
@@ -33,13 +18,11 @@ body { margin:0; overflow:hidden; background:#87cfff; }
 }
 </style>
 </head>
-
 <body>
 
-<div id="crosshair"></div>
-<div id="hud">FPS WORLD (OPTIMIZED)</div>
+<div id="hud">CLICK TO PLAY (WASD + SPACE)</div>
 
-<!-- THREE -->
+<!-- THREE + LOADER -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 
@@ -55,64 +38,48 @@ renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
 // LIGHT
-scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-sun.position.set(20,40,10);
-scene.add(sun);
-
-// ================= PLAYER =================
-const player = new THREE.Object3D();
-scene.add(player);
-player.add(camera);
-camera.position.set(0,2,0);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
 
 // ================= INPUT =================
 const keys = {};
 addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
 addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
 
-// mouse look
-let yaw=0,pitch=0;
-
-document.addEventListener("mousemove",(e)=>{
-if(document.pointerLockElement!==document.body) return;
-
-yaw -= e.movementX*0.002;
-pitch -= e.movementY*0.002;
-
-pitch = Math.max(-1.2,Math.min(1.2,pitch));
-
-player.rotation.y = yaw;
-camera.rotation.x = pitch;
-});
-
-document.body.addEventListener("click",()=>document.body.requestPointerLock());
-
-// ================= PHYSICS =================
+// ================= PLAYER =================
 let velY = 0;
 let onGround = true;
 
-// ================= GLB CACHE SYSTEM =================
+// ================= GLB SYSTEM (CACHE) =================
 const loader = new THREE.GLTFLoader();
 
 let treeModel = null;
 let ready = false;
 let queue = [];
 
-loader.load("./baum.glb",(gltf)=>{
+// LOAD ONCE
+loader.load("./baum.glb",
 
-treeModel = gltf.scene;
-ready = true;
+(gltf)=>{
+  treeModel = gltf.scene;
+  ready = true;
 
-// queued trees
-queue.forEach(t=>{
-spawnTree(t.x,t.y,t.z);
+  console.log("✅ Baum geladen");
+
+  // queued trees spawn
+  queue.forEach(t=>{
+    spawnTree(t.x,t.y,t.z);
+  });
+
+  queue = [];
+},
+
+undefined,
+
+(err)=>{
+  console.error("❌ GLB ERROR:", err);
 });
-queue = [];
 
-});
-
-// ================= TREE SPAWN (NO RELOAD) =================
+// ================= SPAWN TREE (NO RELOAD) =================
 function spawnTree(x,y,z){
 
 if(!ready){
@@ -128,7 +95,7 @@ tree.scale.set(1,1,1);
 scene.add(tree);
 }
 
-// ================= WORLD GENERATION =================
+// ================= WORLD =================
 for(let i=0;i<200;i++){
 spawnTree(
 (Math.random()-0.5)*200,
@@ -141,31 +108,19 @@ spawnTree(
 function move(){
 const speed = 0.25;
 
-let dir = new THREE.Vector3();
-if(keys["w"]) dir.z -= 1;
-if(keys["s"]) dir.z += 1;
-if(keys["a"]) dir.x -= 1;
-if(keys["d"]) dir.x += 1;
-
-dir.normalize();
-
-const forward = new THREE.Vector3(0,0,-1).applyEuler(player.rotation);
-forward.y = 0;
-forward.normalize();
-
-const right = new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).negate();
-
-player.position.addScaledVector(forward,dir.z*speed);
-player.position.addScaledVector(right,dir.x*speed);
+if(keys["w"]) camera.position.z -= speed;
+if(keys["s"]) camera.position.z += speed;
+if(keys["a"]) camera.position.x -= speed;
+if(keys["d"]) camera.position.x += speed;
 }
 
 // ================= GRAVITY =================
 function gravity(){
 velY -= 0.02;
-player.position.y += velY;
+camera.position.y += velY;
 
-if(player.position.y < 0){
-player.position.y = 0;
+if(camera.position.y < 2){
+camera.position.y = 2;
 velY = 0;
 onGround = true;
 }
@@ -173,9 +128,14 @@ onGround = true;
 
 addEventListener("keydown",(e)=>{
 if(e.code==="Space" && onGround){
-velY = 0.3;
+velY = 0.35;
 onGround = false;
 }
+});
+
+// ================= CLICK START =================
+document.body.addEventListener("click",()=>{
+document.body.requestPointerLock();
 });
 
 // ================= LOOP =================
@@ -185,18 +145,16 @@ requestAnimationFrame(animate);
 move();
 gravity();
 
-camera.position.y += (2 + player.position.y - camera.position.y)*0.15;
-
 renderer.render(scene,camera);
 }
 
 animate();
 
-// resize
+// RESIZE
 addEventListener("resize",()=>{
-camera.aspect=innerWidth/innerHeight;
+camera.aspect = innerWidth/innerHeight;
 camera.updateProjectionMatrix();
-renderer.setSize(innerWidth,innerHeight);
+renderer.setSize(innerWidth, innerHeight);
 });
 
 </script>
