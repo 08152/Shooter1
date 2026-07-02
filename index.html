@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>FULL FPS GLB WORLD</title>
+<title>FPS GLB OPTIMIZED</title>
 
 <style>
 body { margin:0; overflow:hidden; background:#87cfff; }
@@ -13,7 +13,6 @@ body { margin:0; overflow:hidden; background:#87cfff; }
   left:50%;
   width:10px;height:10px;
   transform:translate(-50%,-50%);
-  z-index:10;
 }
 #crosshair:before,#crosshair:after{
   content:"";
@@ -23,32 +22,14 @@ body { margin:0; overflow:hidden; background:#87cfff; }
 #crosshair:before{width:2px;height:10px;left:4px;}
 #crosshair:after{width:10px;height:2px;top:4px;}
 
-#coords{
-  position:absolute;
-  bottom:10px;
-  right:10px;
-  color:white;
-  font-family:Arial;
-  font-size:13px;
-  background:rgba(0,0,0,0.4);
-  padding:6px;
-  border-radius:6px;
-  white-space:pre;
-}
-
-#healthBar{
+#hud{
   position:absolute;
   bottom:10px;
   left:10px;
-  width:220px;
-  height:18px;
-  border:2px solid white;
-  background:rgba(0,0,0,0.3);
-}
-#healthFill{
-  width:100%;
-  height:100%;
-  background:#1e90ff;
+  color:white;
+  font-family:Arial;
+  background:rgba(0,0,0,0.4);
+  padding:6px;
 }
 </style>
 </head>
@@ -56,10 +37,9 @@ body { margin:0; overflow:hidden; background:#87cfff; }
 <body>
 
 <div id="crosshair"></div>
-<div id="coords"></div>
-<div id="healthBar"><div id="healthFill"></div></div>
+<div id="hud">FPS WORLD (OPTIMIZED)</div>
 
-<!-- THREE + GLTF LOADER -->
+<!-- THREE -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 
@@ -74,47 +54,92 @@ const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// ================= LIGHT =================
+// LIGHT
 scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-sun.position.set(10,20,10);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(20,40,10);
 scene.add(sun);
 
 // ================= PLAYER =================
 const player = new THREE.Object3D();
 scene.add(player);
 player.add(camera);
-camera.position.set(0,2.2,0);
+camera.position.set(0,2,0);
 
 // ================= INPUT =================
 const keys = {};
-addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
-addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+addEventListener("keydown",e=>keys[e.key.toLowerCase()]=true);
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
 
-// ================= LOOK =================
-let yaw = 0, pitch = 0;
+// mouse look
+let yaw=0,pitch=0;
 
 document.addEventListener("mousemove",(e)=>{
-if(document.pointerLockElement !== document.body) return;
+if(document.pointerLockElement!==document.body) return;
 
-yaw -= e.movementX * 0.002;
-pitch -= e.movementY * 0.002;
+yaw -= e.movementX*0.002;
+pitch -= e.movementY*0.002;
 
-pitch = Math.max(-1.2, Math.min(1.2, pitch));
+pitch = Math.max(-1.2,Math.min(1.2,pitch));
 
 player.rotation.y = yaw;
 camera.rotation.x = pitch;
 });
 
-document.body.addEventListener("click", ()=>document.body.requestPointerLock());
+document.body.addEventListener("click",()=>document.body.requestPointerLock());
 
 // ================= PHYSICS =================
 let velY = 0;
 let onGround = true;
 
+// ================= GLB CACHE SYSTEM =================
+const loader = new THREE.GLTFLoader();
+
+let treeModel = null;
+let ready = false;
+let queue = [];
+
+loader.load("./baum.glb",(gltf)=>{
+
+treeModel = gltf.scene;
+ready = true;
+
+// queued trees
+queue.forEach(t=>{
+spawnTree(t.x,t.y,t.z);
+});
+queue = [];
+
+});
+
+// ================= TREE SPAWN (NO RELOAD) =================
+function spawnTree(x,y,z){
+
+if(!ready){
+queue.push({x,y,z});
+return;
+}
+
+const tree = treeModel.clone(); // 🔥 CACHE COPY
+
+tree.position.set(x,y,z);
+tree.scale.set(1,1,1);
+
+scene.add(tree);
+}
+
+// ================= WORLD GENERATION =================
+for(let i=0;i<200;i++){
+spawnTree(
+(Math.random()-0.5)*200,
+-1,
+(Math.random()-0.5)*200
+);
+}
+
 // ================= MOVE =================
 function move(){
-const speed = 0.15;
+const speed = 0.25;
 
 let dir = new THREE.Vector3();
 if(keys["w"]) dir.z -= 1;
@@ -125,20 +150,21 @@ if(keys["d"]) dir.x += 1;
 dir.normalize();
 
 const forward = new THREE.Vector3(0,0,-1).applyEuler(player.rotation);
-forward.y = 0; forward.normalize();
+forward.y = 0;
+forward.normalize();
 
-const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).negate();
+const right = new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).negate();
 
-player.position.addScaledVector(forward, dir.z * speed);
-player.position.addScaledVector(right, dir.x * speed);
+player.position.addScaledVector(forward,dir.z*speed);
+player.position.addScaledVector(right,dir.x*speed);
 }
 
 // ================= GRAVITY =================
 function gravity(){
-velY -= 0.015;
+velY -= 0.02;
 player.position.y += velY;
 
-if(player.position.y <= 0){
+if(player.position.y < 0){
 player.position.y = 0;
 velY = 0;
 onGround = true;
@@ -146,52 +172,11 @@ onGround = true;
 }
 
 addEventListener("keydown",(e)=>{
-if(e.code === "Space" && onGround){
-velY = 0.25;
+if(e.code==="Space" && onGround){
+velY = 0.3;
 onGround = false;
 }
 });
-
-// ================= GLB SYSTEM =================
-const gltfLoader = new THREE.GLTFLoader();
-let collidables = [];
-
-function addModel(url, x, y, z, scale = 1){
-
-gltfLoader.load(
-url,
-(gltf)=>{
-
-const obj = gltf.scene;
-
-obj.position.set(x,y,z);
-obj.scale.set(scale,scale,scale);
-
-scene.add(obj);
-
-obj.userData.box = new THREE.Box3();
-collidables.push(obj);
-
-},
-undefined,
-(err)=>{
-console.error("GLB ERROR:", url, err);
-}
-);
-
-}
-
-// ================= BAUM.GLB =================
-function addTree(x,y,z,scale=1){
-addModel("./baum.glb", x,y,z,scale);
-}
-
-addTree(-18,-1,-5,1);
-addTree(-5,-1,10,1);
-addTree(27,-1,-1,1);
-addTree(38,-1,-41,1);
-addTree(-24,-1,3,1);
-addTree(4,-1,-5,1);
 
 // ================= LOOP =================
 function animate(){
@@ -200,23 +185,18 @@ requestAnimationFrame(animate);
 move();
 gravity();
 
-camera.position.y += (2.2 + player.position.y - camera.position.y) * 0.15;
-
-document.getElementById("coords").innerText =
-`X:${player.position.x.toFixed(2)}
-Y:${player.position.y.toFixed(2)}
-Z:${player.position.z.toFixed(2)}`;
+camera.position.y += (2 + player.position.y - camera.position.y)*0.15;
 
 renderer.render(scene,camera);
 }
 
 animate();
 
-// ================= RESIZE =================
-addEventListener("resize", ()=>{
-camera.aspect = innerWidth/innerHeight;
+// resize
+addEventListener("resize",()=>{
+camera.aspect=innerWidth/innerHeight;
 camera.updateProjectionMatrix();
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(innerWidth,innerHeight);
 });
 
 </script>
