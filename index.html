@@ -122,39 +122,23 @@ function createGround(x,z){
 }
 
 /* ---------------- GLB TREE ---------------- */
-let treeModel = null;
-
-const loader = new GLTFLoader();
-
-/* 🔥 SAFE LOAD (FIXED) */
 loader.load(
-  "./baum.glb",
-  glb => {
-    console.log("GLB LOADED");
-    treeModel = glb.scene;
+  "baum.glb",
+  (gltf) => {
+    const model = gltf.scene;
 
-    // update existing chunks
-    for(const key in chunks){
-      const group = chunks[key];
-      const pending = group.userData.pendingTrees || [];
+    scene.add(model);
 
-      pending.forEach(t => {
-        const tree = treeModel.clone();
-        tree.position.set(t.x,t.y,t.z);
-        tree.scale.set(2,2,2);
-        group.add(tree);
-      });
-    }
+    model.position.set(0, 0, -5);
+    model.scale.set(5, 5, 5);
+
+    console.log("GLB ADDED TO SCENE");
   },
-  xhr => {
-    hud.innerHTML = "Loading GLB: " + Math.round((xhr.loaded/xhr.total)*100) + "%";
-  },
-  err => {
+  undefined,
+  (err) => {
     console.error("GLB ERROR:", err);
-    hud.innerHTML = "GLB ERROR ❌ Check file path!";
   }
 );
-
 /* ---------------- CHUNKS ---------------- */
 function createChunk(cx,cz){
   const key = cx+","+cz;
