@@ -2,21 +2,22 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8" />
-<title>FPS Infinite World</title>
+<title>FPS Infinite World - Clean</title>
 
 <style>
-body { margin:0; overflow:hidden; background:#87ceeb; }
+body { margin:0; overflow:hidden; background:#87ceeb; user-select: none; }
 #hud {
   position:absolute;
   top:10px;
   left:10px;
   color:white;
-  font-family:Arial;
+  font-family:Arial, sans-serif;
   font-size:14px;
-  background:rgba(0,0,0,0.4);
-  padding:10px;
+  background:rgba(0,0,0,0.5);
+  padding:12px;
   border-radius:8px;
   z-index: 10;
+  pointer-events: none;
 }
 #center {
   position:absolute;
@@ -28,130 +29,166 @@ body { margin:0; overflow:hidden; background:#87ceeb; }
   transform:translate(-50%,-50%);
   border-radius:50%;
   z-index: 10;
+  pointer-events: none;
+}
+#instructions {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-family: Arial, sans-serif;
+  z-index: 20;
+  cursor: pointer;
 }
 </style>
+
+<!-- Sichere und stabile Three.js Versionen via CDN -->
+<script src="https://cloudflare.com"></script>
+<script src="https://jsdelivr.net"></script>
 
 </head>
 
 <body>
-<div id="hud">Loading...</div>
+<div id="instructions">
+  <h2>Klicken zum Spielen</h2>
+  <p>W, A, S, D = Bewegen | Leertaste = Springen | Maus = Umschauen</p>
+</div>
+<div id="hud">Initialisiere Welt...</div>
 <div id="center"></div>
 
-<script type="module">
-
-import * as THREE from "https://jsdelivr.net";
-import { GLTFLoader } from "https://jsdelivr.net";
+<script>
+const instructions = document.getElementById("instructions");
+const hud = document.getElementById("hud");
 
 /* -------------------- BASIC SETUP -------------------- */
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.FogExp2(0x87ceeb, 0.015); // Nebel für sanfte Chunk-Übergänge
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 10, 0);
-camera.rotation.order = 'YXZ'; // Fix 1: Verhindert das Neigen der Kamera beim Umschauen
+camera.rotation.order = 'YXZ'; // Verhindert Motion Sickness / Schrägstellung der Kamera
 
-const renderer = new THREE.WebGLRenderer({ antialias:true });
-renderer.setSize(innerWidth, innerHeight);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance-Sicherung
 document.body.appendChild(renderer.domElement);
 
-/* LIGHT */
-const light = new THREE.DirectionalLight(0xffffff, 1);
-light.position.set(50,100,20);
-scene.add(light);
+/* BELEUCHTUNG */
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+scene.add(ambientLight);
 
-/* -------------------- PLAYER -------------------- */
-let velocityY = 0;
-let canJump = false;
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight.position.set(20, 40, 20);
+scene.add(dirLight);
 
+/* -------------------- STEUERUNG -------------------- */
 const keys = {};
-document.addEventListener("keydown", e => keys[e.code]=true);
-document.addEventListener("keyup", e => keys[e.code]=false);
+let rotX = 0, rotY = 0;
 
-/* Pointer Lock */
-document.body.addEventListener("click", () => {
+document.addEventListener("keydown", e => keys[e.code] = true);
+document.addEventListener("keyup", e => keys[e.code] = false);
+
+instructions.addEventListener("click", () => {
   document.body.requestPointerLock();
 });
 
-let rotX = 0, rotY = 0;
-
-document.addEventListener("mousemove", e => {
-  if(document.pointerLockElement === document.body){
-    rotY -= e.movementX * 0.002;
-    rotX -= e.movementY * 0.002;
-    rotX = Math.max(-1.5, Math.min(1.5, rotX));
+document.addEventListener("pointerlockchange", () => {
+  if (document.pointerLockElement === document.body) {
+    instructions.style.display = "none";
+  } else {
+    instructions.style.display = "flex";
   }
 });
 
-/* -------------------- WORLD -------------------- */
+document.addEventListener("mousemove", e => {
+  if (document.pointerLockElement === document.body) {
+    rotY -= e.movementX * 0.0025;
+    rotX -= e.movementY * 0.0025;
+    rotX = Math.max(-1.4, Math.min(1.4, rotX)); // Blickwinkel nach oben/unten begrenzen
+  }
+});
+
+/* -------------------- WELT-GENERIERUNG -------------------- */
 const chunks = {};
 const CHUNK_SIZE = 50;
 const RENDER_DISTANCE = 2;
 
-/* Bodenhöhen-Berechnung */
-function getHeight(x,z){
+// Mathematische Höhenformel für unendliches Terrain
+function getHeight(x, z) {
   return (
-    Math.sin(x*0.05)*2 +
-    Math.cos(z*0.05)*2 +
-    Math.sin((x+z)*0.02)*3
+    Math.sin(x * 0.04) * 2.5 +
+    Math.cos(z * 0.04) * 2.5 +
+    Math.sin((x + z) * 0.01) * 4
   );
 }
 
-/* Grasboden erstellen */
-function createGround(x,z){
-  const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, 10, 10);
+function createGround(x, z) {
+  const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, 12, 12);
+  const pos = geo.attributes.position;
 
-  for(let i=0;i<geo.attributes.position.count;i++){
-    const vx = geo.attributes.position.getX(i) + x;
-    const vz = geo.attributes.position.getY(i) + z;
-    const vy = getHeight(vx,vz);
-    geo.attributes.position.setZ(i, vy);
+  for (let i = 0; i < pos.count; i++) {
+    const vx = pos.getX(i) + x;
+    const vy = pos.getY(i) + z;
+    const vz = getHeight(vx, vy);
+    pos.setZ(i, vz);
   }
 
   geo.computeVertexNormals();
-
-  const mat = new THREE.MeshLambertMaterial({ color:0x2ecc71 });
+  const mat = new THREE.MeshLambertMaterial({ color: 0x2ecc71, flatShading: true });
   const mesh = new THREE.Mesh(geo, mat);
 
-  mesh.rotation.x = -Math.PI/2;
-  mesh.position.set(x,0,z);
-
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, 0, z);
   return mesh;
 }
 
-/* -------------------- TREE (GLB) -------------------- */
+/* -------------------- TREE LOADING (OHNE FALLBACK) -------------------- */
 let treeModel = null;
 
-const loader = new GLTFLoader();
-loader.load("./baum.glb", glb => {
-  treeModel = glb.scene;
-  // Fix 3: Erste Chunks erst generieren, wenn das Modell geladen ist
-  updateChunks(camera.position.x, camera.position.z); 
-});
+const loader = new THREE.GLTFLoader();
+loader.load(
+  "./baum.glb", 
+  glb => {
+    treeModel = glb.scene;
+    initGame();
+  }, 
+  undefined, 
+  error => {
+    console.error("Konnte baum.glb nicht laden. Welt wird ohne Bäume generiert.");
+    initGame(); // Startet das Spiel trotzdem, erzeugt aber einfach keine Bäume
+  }
+);
 
-/* -------------------- CHUNKS -------------------- */
-function createChunk(cx, cz){
-  const key = cx+","+cz;
-  if(chunks[key]) return;
+/* -------------------- CHUNK LOGIK -------------------- */
+function createChunk(cx, cz) {
+  const key = cx + "," + cz;
+  if (chunks[key]) return;
 
   const group = new THREE.Group();
-
   const worldX = cx * CHUNK_SIZE;
   const worldZ = cz * CHUNK_SIZE;
 
-  /* ground */
-  const ground = createGround(worldX, worldZ);
-  group.add(ground);
+  // Boden hinzufügen
+  group.add(createGround(worldX, worldZ));
 
-  /* trees */
-  for(let i=0;i<6;i++){
-    const x = worldX + (Math.random()-0.5)*CHUNK_SIZE;
-    const z = worldZ + (Math.random()-0.5)*CHUNK_SIZE;
-    const y = getHeight(x,z);
+  // Bäume nur verteilen, wenn das Modell erfolgreich geladen wurde
+  if (treeModel) {
+    for (let i = 0; i < 5; i++) {
+      const x = worldX + (Math.random() - 0.5) * (CHUNK_SIZE - 4);
+      const z = worldZ + (Math.random() - 0.5) * (CHUNK_SIZE - 4);
+      const y = getHeight(x, z);
 
-    if(treeModel){
       const tree = treeModel.clone();
-      tree.position.set(x,y,z);
-      tree.scale.set(2,2,2);
+      tree.position.set(x, y, z);
+      
+      const scale = 1.5 + Math.random() * 1.0;
+      tree.scale.set(scale, scale, scale);
       group.add(tree);
     }
   }
@@ -160,84 +197,85 @@ function createChunk(cx, cz){
   chunks[key] = group;
 }
 
-function updateChunks(px, pz){
-  const cx = Math.floor(px/CHUNK_SIZE);
-  const cz = Math.floor(pz/CHUNK_SIZE);
+function updateChunks(px, pz) {
+  const cx = Math.floor((px + CHUNK_SIZE / 2) / CHUNK_SIZE);
+  const cz = Math.floor((pz + CHUNK_SIZE / 2) / CHUNK_SIZE);
 
-  for(let x=-RENDER_DISTANCE;x<=RENDER_DISTANCE;x++){
-    for(let z=-RENDER_DISTANCE;z<=RENDER_DISTANCE;z++){
-      createChunk(cx+x, cz+z);
+  for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x++) {
+    for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z++) {
+      createChunk(cx + x, cz + z);
     }
   }
 }
 
-/* -------------------- HUD -------------------- */
-const hud = document.getElementById("hud");
-let fps=0, frames=0, last=performance.now();
+/* -------------------- GAME LOOP -------------------- */
+let velocityY = 0;
+let canJump = false;
+let fps = 0, frames = 0, lastTime = performance.now();
 
-/* -------------------- LOOP -------------------- */
-function animate(){
+function initGame() {
+  updateChunks(camera.position.x, camera.position.z);
+  animate();
+}
+
+function animate() {
   requestAnimationFrame(animate);
 
+  // FPS Zähler
   const now = performance.now();
   frames++;
-  if(now-last>=1000){
+  if (now - lastTime >= 1000) {
     fps = frames;
-    frames=0;
-    last=now;
+    frames = 0;
+    lastTime = now;
   }
 
-  /* Kamera-Rotation zuerst setzen, damit Richtungsvektoren stimmen */
+  // Rotation anwenden
   camera.rotation.set(rotX, rotY, 0);
 
-  /* Fix 2: Saubere Seitwärts- und Vorwärtsbewegung relativ zur Blickrichtung */
-  const speed = 0.3;
+  // FPS Steuerung (Relativ zur Blickrichtung)
+  const speed = 0.25;
   if (keys["KeyW"]) camera.translateZ(-speed);
   if (keys["KeyS"]) camera.translateZ(speed);
   if (keys["KeyA"]) camera.translateX(-speed);
   if (keys["KeyD"]) camera.translateX(speed);
 
-  /* Schwerkraft & Höhenanpassung */
+  // Gravitation und Höhenberechnung (2 Einheiten Augenhöhe)
   const groundY = getHeight(camera.position.x, camera.position.z) + 2;
 
-  velocityY -= 0.01;
+  velocityY -= 0.008;
   camera.position.y += velocityY;
 
-  if(camera.position.y < groundY){
+  if (camera.position.y < groundY) {
     camera.position.y = groundY;
     velocityY = 0;
     canJump = true;
   }
 
-  if(keys["Space"] && canJump){
-    velocityY = 0.25;
+  if (keys["Space"] && canJump) {
+    velocityY = 0.22;
     canJump = false;
   }
 
-  /* Nur neue Chunks laden, wenn der Baum geladen ist */
-  if (treeModel) {
-    updateChunks(camera.position.x, camera.position.z);
-  }
+  // Laufend Chunks nachladen
+  updateChunks(camera.position.x, camera.position.z);
 
-  /* HUD aktualisieren */
+  // HUD
   hud.innerHTML =
-    `FPS: ${fps}<br>`+
-    `X: ${camera.position.x.toFixed(1)}<br>`+
-    `Y: ${camera.position.y.toFixed(1)}<br>`+
+    `FPS: ${fps}<br>` +
+    `X: ${camera.position.x.toFixed(1)}<br>` +
+    `Y: ${camera.position.y.toFixed(1)}<br>` +
     `Z: ${camera.position.z.toFixed(1)}`;
 
   renderer.render(scene, camera);
 }
 
-animate();
-
-/* Fenstergröße anpassen */
-window.addEventListener("resize", ()=>{
-  camera.aspect = innerWidth/innerHeight;
+// Fenstergröße dynamisch anpassen
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(window.innerWidth, window.innerHeight);
 });
-
 </script>
 </body>
 </html>
