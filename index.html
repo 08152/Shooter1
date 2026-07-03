@@ -9,9 +9,9 @@
         canvas { display: block; }
         #ui { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; pointer-events: none; }
         #crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
-        #instructions { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; }
+        #instructions { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; z-index: 10; }
     </style>
-    <!-- Import Maps für saubere Three.js JSM Imports -->
+    <!-- Import Maps für Three.js JSM Imports -->
     <script type="importmap">
         {
             "imports": {
@@ -115,26 +115,56 @@
 
         // --- 3. MODELL-VERWALTUNG & CLONING ---
         const gltfLoader = new GLTFLoader();
-        const modelCache = {}; // Cache für verschiedene Modelle (baum, tree, etc.)
-        let collidables = []; // Globale Liste für Box-Kollisionen
-
-        // Erlaubte Modellnamen laut deiner Definition
+        const modelCache = {}; 
+        let collidables = []; 
         const modelNames = ['baum', 'barrier', 'tree', 'bush'];
 
-        // Funktion zum Vorabladen der Modelle in den Cache
+        // Hilfsfunktion: Erzeugt ein Ersatz-Objekt, falls eine .glb-Datei fehlt
+        function createDummyModel(color, name) {
+            const group = new THREE.Group();
+            if (name === 'barrier') {
+                const box = new THREE.Mesh(new THREE.BoxGeometry(3, 1.5, 0.5), new THREE.MeshStandardMaterial({color: color}));
+                box.position.y = 0.75;
+                group.add(box);
+            } else {
+                const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 2), new THREE.MeshStandardMaterial({color: 0x8B4513}));
+                trunk.position.y = 1;
+                const top = new THREE.Mesh(new THREE.SphereGeometry(name === 'bush' ? 0.7 : 1.2), new THREE.MeshStandardMaterial({color: color}));
+                top.position.y = name === 'bush' ? 1.2 : 2.5;
+                group.add(trunk, top);
+            }
+            return group;
+        }
+
+        // Initiale Platzhalter setzen (Damit sofort alles funktioniert)
+        const colors = [0x2e8b57, 0x8b0000, 0x006400, 0x556b2f];
+        modelNames.forEach((name, index) => {
+            modelCache[name] = createDummyModel(colors[index], name);
+        });
+
+        // Funktion zum Laden der echten Modelle
         function preloadModel(name, url) {
             gltfLoader.load(url, (gltf) => {
                 modelCache[name] = gltf.scene;
-                // Generiere Chunks initial neu, falls Modelle verspätet laden
+                // Chunks neu aufbauen, sobald das echte Modell geladen ist
                 updateChunks(true);
-            }, undefined, (err) => console.error(`Fehler beim Laden von ${name}:`, err));
+            }, undefined, (err) => {
+                console.warn(`Nutze Ersatz-Form für '${name}'. Datei '${url}' nicht gefunden oder kein Live-Server aktiv.`);
+            });
         }
 
-        // Nutzen deines gewünschten Klon-Ansatzes mit SkeletonUtils
+        // Deine exakte Pfadanpassung: baum.glb liegt direkt im Hauptordner!
+        preloadModel('baum', './baum.glb');
+        preloadModel('barrier', './barrier.glb');
+        preloadModel('tree', './tree.glb');
+        preloadModel('bush', './bush.glb');
+
+        // Funktion zum Klonen mittels SkeletonUtils
         function addModelClone(name, x, y, z, scale = 1) {
             const cachedModel = modelCache[name];
             if (!cachedModel) return null;
 
+            // Sicherer Klon für GLTF-Modelle
             const clonedObj = SkeletonUtils.clone(cachedModel);
             clonedObj.scale.set(scale, scale, scale);
             clonedObj.position.set(x, y, z);
@@ -145,29 +175,9 @@
             return clonedObj;
         }
 
-        // Dummy-Modell-Erstellung (Falls echte .glb-Dateien lokal fehlen, stürzt das Spiel nicht ab)
-        function createDummyModel(color) {
-            const group = new THREE.Group();
-            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 2), new THREE.MeshStandardMaterial({color: 0x8B4513}));
-            trunk.position.y = 1;
-            const top = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshStandardMaterial({color: color}));
-            top.position.y = 2.5;
-            group.add(trunk, top);
-            return group;
-        }
-        
-        // Befüllen des Caches mit Fallback zu Demozwecken
-        modelNames.forEach((name, index) => {
-            // HINWEIS: Ersetze die URL mit deinen echten Pfaden (z.B. 'models/tree.glb')
-            preloadModel(name, `models/${name}.glb`);
-            // Fallback-Dummies direkt aktivieren, falls Server-Pfade fehlen:
-            const colors = [0x2e8b57, 0x8b0000, 0x006400, 0x556b2f];
-            modelCache[name] = createDummyModel(colors[index]);
-        });
-
         // --- 4. CHUNK SYSTEM ---
-        const CHUNK_SIZE = 50;
-        const RENDER_DISTANCE = 2; // Radius um den Spieler
+        const CHUNK_SIZE = 40;
+        const RENDER_DISTANCE = 2; 
         const loadedChunks = new Map();
 
         function getChunkKey(cx, cz) { return `${cx},${cz}`; }
@@ -187,53 +197,61 @@
                     const key = getChunkKey(cx, cz);
                     chunksToKeep.add(key);
 
-                    if (!loadedChunks.has(key)) {
+                    // Wenn erzwungen (Modell fertig geladen) oder Chunk neu: generieren
+                    if (!loadedChunks.has(key) || force) {
+                        // Falls erzwungen, alten Chunk vorher löschen
+                        if (loadedChunks.has(key)) {
+                            loadedChunks.get(key).forEach(obj => {
+                                scene.remove(obj);
+                                collidables = collidables.filter(c => c !== obj);
+                            });
+                        }
                         generateChunk(cx, cz);
                     }
                 }
             }
 
-            // Entferne zu weit entfernte Chunks aus der Szene
-            for (const [key, objects] of loadedChunks.entries()) {
-                if (!chunksToKeep.has(key)) {
-                    objects.forEach(obj => {
-                        scene.remove(obj);
-                        collidables = collidables.filter(c => c !== obj);
-                    });
-                    loadedChunks.delete(key);
+            // Alte Chunks entladen
+            if (!force) {
+                for (const [key, objects] of loadedChunks.entries()) {
+                    if (!chunksToKeep.has(key)) {
+                        objects.forEach(obj => {
+                            scene.remove(obj);
+                            collidables = collidables.filter(c => c !== obj);
+                        });
+                        loadedChunks.delete(key);
+                    }
                 }
             }
         }
 
         function generateChunk(cx, cz) {
             const objectsInChunk = [];
-            // Deterministischer Seed basierend auf Chunk-Koordinaten für identische Welten
-            const count = 5; 
+            const count = 4; // Objekte pro Chunk
 
             for (let i = 0; i < count; i++) {
+                // Deterministischer Zufall basierend auf Position
                 const pseudoRandom = Math.sin(cx * 12.9898 + cz * 78.233 + i) * 43758.5453123 % 1;
                 const randX = (cx * CHUNK_SIZE) + (Math.abs(pseudoRandom) * CHUNK_SIZE);
-                const randZ = (cz * CHUNK_SIZE) + (Math.abs((pseudoRandom * 10) % 1) * CHUNK_SIZE);
-                
-                // Wähle zufälligen Modelltyp aus deiner Liste
-                const modelIndex = Math.floor(Math.abs(pseudoRandom * 100)) % modelNames.length;
-                const modelName = modelNames[modelIndex];
+const randZ = (cz * CHUNK_SIZE) + (Math.abs((pseudoRandom * 10) % 1) * CHUNK_SIZE);
 
-                const scale = 0.8 + Math.abs(pseudoRandom % 0.6);
-                const obj = addModelClone(randX, 0, randZ, scale);
-                
-                if (obj) objectsInChunk.push(obj);
-            }
+const modelIndex = Math.floor(Math.abs(pseudoRandom * 100)) % modelNames.length;
+const modelName = modelNames[modelIndex];
 
-            loadedChunks.set(getChunkKey(cx, cz), objectsInChunk);
-        }
+const scale = 0.7 + Math.abs(pseudoRandom % 0.6);
+const obj = addModelClone(modelName, randX, 0, randZ, scale);
 
-        // --- 5. KOLLISION & PHYSICS ---
-        const playerRadius = 0.6;
+if (obj) objectsInChunk.push(obj);
+}
 
-        function checkCollisions(oldPos) {
-            // Einfache Bounding-Box Kollisionsprüfung für geladene Clones
-        const playerBox = new THREE.Box3(
+loadedChunks.set(getChunkKey(cx, cz), objectsInChunk);
+}
+
+// --- 5. KOLLISION & PHYSICS ---
+const playerRadius = 0.6;
+
+function checkCollisions(oldPos) {
+const playerBox = new THREE.Box3(
 new THREE.Vector3(player.position.x - playerRadius, player.position.y - 2, player.position.z - playerRadius),
 new THREE.Vector3(player.position.x + playerRadius, player.position.y, player.position.z + playerRadius)
 );
@@ -242,7 +260,7 @@ for (let i = 0; i < collidables.length; i++) {
 const meshBox = new THREE.Box3().setFromObject(collidables[i]);
 
 if (playerBox.intersectsBox(meshBox)) {
-// Bei Kollision wird die Bewegung auf der XZ-Ebene zurückgesetzt
+// Kollisions-Stopp auf der XZ Ebene
 player.position.x = oldPos.x;
 player.position.z = oldPos.z;
 break;
@@ -255,16 +273,14 @@ const clock = new THREE.Clock();
 
 function animate() {
 requestAnimationFrame(animate);
-const delta = Math.min(clock.getDelta(), 0.1); // Deckelung gegen extreme Ruckler
+const delta = Math.min(clock.getDelta(), 0.1);
 
-// UI-Koordinaten updaten
 document.getElementById('posX').innerText = Math.round(player.position.x);
 document.getElementById('posZ').innerText = Math.round(player.position.z);
 
-// Altes Positions-Backup für Kollisionsauflösung
 const oldPosition = player.position.clone();
 
-// Richtungs-Vektoren berechnen
+// Richtungsvektoren berechnen
 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion).setY(0).normalize();
 const side = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quaternion).setY(0).normalize();
 
@@ -277,14 +293,14 @@ if (keys.a) moveVelocity.add(side.clone().negate());
 moveVelocity.normalize().multiplyScalar(SPEED * delta);
 player.position.add(moveVelocity);
 
-// X/Z Kollisionsprüfung direkt nach Bewegung
+// Bewegung kollidieren
 checkCollisions(oldPosition);
 
-// Schwerkraft & Springen
+// Schwerkraft & Sprung-Berechnung
 verticalVelocity -= GRAVITY * delta;
 player.position.y += verticalVelocity * delta;
 
-if (player.position.y <= 2) { // 2 = Augenhöhe über dem Boden (y=0)
+if (player.position.y <= 2) {
 player.position.y = 2;
 verticalVelocity = 0;
 isGrounded = true;
@@ -297,18 +313,16 @@ verticalVelocity = JUMP_FORCE;
 isGrounded = false;
 }
 
-// Chunk Management triggern
 updateChunks();
-
 renderer.render(scene, camera);
 }
 
-// --- 7. FENSTERGRÖSSE ANPASSEN ---
+// --- 7. RESIZE ---
 window.addEventListener('resize', () => {
 camera.aspect = window.innerWidth / window.innerHeight;
 camera.updateProjectionMatrix();
 renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Start des Spiels
+// Start
 animate();
