@@ -1,0 +1,46 @@
+body{
+    margin:0;
+    overflow:hidden;
+    background:#87cfff;
+}
+
+#crosshair{
+    position:absolute;
+    top:50%;
+    left:50%;
+    width:10px;
+    height:10px;
+    transform:translate(-50%,-50%);
+}
+
+#crosshair:before,
+#crosshair:after{
+    content:"";
+    position:absolute;
+    background:white;
+}
+
+#crosshair:before{
+    width:2px;
+    height:10px;
+    left:4px;
+}
+
+#crosshair:after{
+    width:10px;
+    height:2px;
+    top:4px;
+}
+
+#coords{
+    position:absolute;
+    bottom:10px;
+    right:10px;
+    color:white;
+    font-family:Arial;
+    font-size:13px;
+    background:rgba(0,0,0,.4);
+    padding:6px;
+    border-radius:6px;
+    white-space:pre;
+}
