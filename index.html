@@ -14,28 +14,27 @@ body {
   justify-content: center;
   align-items: center;
   height: 100vh;
+  flex-direction: column;
 }
 
 button {
   padding: 20px 40px;
-  font-size: 22px;
+  font-size: 20px;
+  margin: 10px;
   border: none;
   background: #00ff88;
   border-radius: 10px;
   cursor: pointer;
-}
-
-button:hover {
-  background: #00cc6a;
 }
 </style>
 </head>
 
 <body>
 
-<button onclick="location.href='game_start.html'">
-  Level Start
-</button>
+<h1>Level Auswahl</h1>
+
+<button onclick="location.href='editor.html'">Level 1 bearbeiten</button>
+<button onclick="location.href='game_start.html'">Spielen</button>
 
 </body>
 </html>
