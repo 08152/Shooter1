@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>Game</title>
+<title>Game Start</title>
 
 <style>
 body {
@@ -29,10 +29,23 @@ const ctx = canvas.getContext("2d");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-// LOAD LEVEL
+// LEVEL
 let level = JSON.parse(localStorage.getItem("level1") || "[]");
 
-let player = {x:100,y:100,w:40,h:40,vy:0,g:0.8,jump:-14,grounded:false};
+// PLAYER
+let player = {
+  x: 150,
+  y: 200,
+  w: 40,
+  h: 40,
+  vy: 0,
+  g: 0.9,
+  jump: -18,   // 🔥 stärkerer Jump
+  grounded: false
+};
+
+// WORLD SPEED (AUTO RUN)
+let speed = 10; // 🔥 schneller
 
 function jump(){
   if(player.grounded){
@@ -41,72 +54,84 @@ function jump(){
   }
 }
 
-document.addEventListener("keydown",e=>{if(e.code==="Space")jump();});
+document.addEventListener("keydown",e=>{
+  if(e.code==="Space") jump();
+});
 document.addEventListener("click",jump);
 
 function loop(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // PLAYER
+  // AUTO MOVE WORLD (Geometry Dash Style)
+  for(let o of level){
+    o.x -= speed;
+  }
+
+  // PLAYER PHYSICS
   player.vy += player.g;
   player.y += player.vy;
 
-  if(player.y+player.h>=canvas.height-20){
-    player.y=canvas.height-20-player.h;
-    player.vy=0;
-    player.grounded=true;
+  if(player.y + player.h >= canvas.height - 20){
+    player.y = canvas.height - 20 - player.h;
+    player.vy = 0;
+    player.grounded = true;
   }
 
-  ctx.fillStyle="lime";
-  ctx.fillRect(player.x,player.y,player.w,player.h);
+  // DRAW PLAYER
+  ctx.fillStyle = "lime";
+  ctx.fillRect(player.x, player.y, player.w, player.h);
 
-  // OBJECTS
+  // DRAW OBJECTS
   for(let o of level){
 
-    if(o.type==="block"){
-      ctx.fillStyle="#777";
-      ctx.fillRect(o.x,o.y,40,40);
-    }
+    if(o.type === "block"){
+      ctx.fillStyle = "#777";
+      ctx.fillRect(o.x, o.y, 40, 40);
 
-    if(o.type==="spike"){
-      ctx.fillStyle="red";
-      ctx.fillRect(o.x,o.y,40,40);
-    }
-
-    if(o.type==="jumppad"){
-      ctx.fillStyle="yellow";
-      ctx.fillRect(o.x,o.y,40,10);
-    }
-
-    if(o.type==="end"){
-      ctx.fillStyle="blue";
-      ctx.fillRect(o.x,o.y,40,40);
-
-      if(player.x < o.x+40 && player.x+player.w > o.x){
-        alert("LEVEL COMPLETE!");
-      }
-    }
-
-    // COLLISION BLOCKS
-    if(o.type==="block"){
       if(
-        player.x < o.x+40 &&
-        player.x+player.w > o.x &&
-        player.y < o.y+40 &&
-        player.y+player.h > o.y
+        player.x < o.x + 40 &&
+        player.x + player.w > o.x &&
+        player.y < o.y + 40 &&
+        player.y + player.h > o.y
       ){
         location.reload();
       }
     }
 
-    // SPIKES
-    if(o.type==="spike"){
+    if(o.type === "spike"){
+      ctx.fillStyle = "red";
+      ctx.fillRect(o.x, o.y, 40, 40);
+
       if(
-        player.x < o.x+40 &&
-        player.x+player.w > o.x &&
-        player.y < o.y+40 &&
-        player.y+player.h > o.y
+        player.x < o.x + 40 &&
+        player.x + player.w > o.x &&
+        player.y < o.y + 40 &&
+        player.y + player.h > o.y
       ){
+        location.reload();
+      }
+    }
+
+    if(o.type === "jumppad"){
+      ctx.fillStyle = "yellow";
+      ctx.fillRect(o.x, o.y, 40, 10);
+
+      // BOOST JUMP
+      if(
+        player.x < o.x + 40 &&
+        player.x + player.w > o.x &&
+        player.y + player.h >= o.y
+      ){
+        player.vy = -25; // 🔥 extra boost
+      }
+    }
+
+    if(o.type === "end"){
+      ctx.fillStyle = "blue";
+      ctx.fillRect(o.x, o.y, 40, 40);
+
+      if(player.x < o.x + 40){
+        alert("LEVEL COMPLETE!");
         location.reload();
       }
     }
