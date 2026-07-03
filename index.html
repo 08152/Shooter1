@@ -26,6 +26,10 @@ button {
   border-radius: 10px;
   cursor: pointer;
 }
+
+button:hover {
+  background: #00cc6a;
+}
 </style>
 </head>
 
@@ -33,8 +37,21 @@ button {
 
 <h1>Level Auswahl</h1>
 
-<button onclick="location.href='editor.html'">Level 1 bearbeiten</button>
-<button onclick="location.href='game_start.html'">Spielen</button>
+<button onclick="location.href='game_start.html'">Play</button>
+
+<button onclick="openEditor()">Editor</button>
+
+<script>
+function openEditor(){
+  const code = prompt("Gib Editor Code ein:");
+
+  if(code === "error422"){
+    location.href = "editor.html";
+  } else {
+    alert("Falscher Code!");
+  }
+}
+</script>
 
 </body>
 </html>
