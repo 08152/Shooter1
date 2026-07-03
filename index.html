@@ -1,21 +1,314 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-<meta charset="UTF-8">
-<title>FPS WORLD (NO WEAPONS)</title>
-
-<link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js FPS World</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; pointer-events: none; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+        #instructions { position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.7); color: white; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; }
+    </style>
+    <!-- Import Maps für saubere Three.js JSM Imports -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com",
+                "three/examples/jsm/": "https://unpkg.com"
+            }
+        }
+    </script>
 </head>
-
 <body>
 
-<div id="crosshair"></div>
-<div id="coords"></div>
+    <div id="instructions">
+        <h1>Klicken zum Spielen</h1>
+        <p>WASD = Bewegen | LEERTASTE = Springen | MAUS = Umsehen</p>
+    </div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <div id="ui">
+        X: <span id="posX">0</span> | Z: <span id="posZ">0</span><br>
+        Chunk: <span id="chunkId">0,0</span>
+    </div>
+    
+    <div id="crosshair"></div>
 
-<script src="glb.js"></script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+        import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
-</body>
-</html>
+        // --- 1. SETUP & WELT ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Blauer Himmel
+        scene.fog = new THREE.FogExp2(0x87CEEB, 0.015); // Nebel
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Licht
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(20, 40, 20);
+        scene.add(dirLight);
+
+        // Riesen-Boden (10.000 x 10.000)
+        const floorGeo = new THREE.PlaneGeometry(10000, 10000);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x3B7A57 }); // Grüner Boden
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        // --- 2. SPIELER & STEUERUNG (FPS) ---
+        const player = new THREE.Object3D();
+        player.position.set(0, 2, 0); // Startposition über dem Boden
+        scene.add(player);
+        player.add(camera); // Kamera an Spieler heften
+
+        const keys = { w: false, a: false, s: false, d: false, space: false };
+        let moveVelocity = new THREE.Vector3();
+        let verticalVelocity = 0;
+        let isGrounded = false;
+
+        const GRAVITY = 30;
+        const JUMP_FORCE = 12;
+        const SPEED = 15;
+
+        // Pointer Lock Steuerung
+        const instructions = document.getElementById('instructions');
+        instructions.addEventListener('click', () => {
+            document.body.requestPointerLock();
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            instructions.style.display = document.pointerLockElement === document.body ? 'none' : 'flex';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement !== document.body) return;
+            player.rotation.y -= e.movementX * 0.002;
+            camera.rotation.x -= e.movementY * 0.002;
+            camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyW') keys.w = true;
+            if (e.code === 'KeyA') keys.a = true;
+            if (e.code === 'KeyS') keys.s = true;
+            if (e.code === 'KeyD') keys.d = true;
+            if (e.code === 'Space') keys.space = true;
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'KeyW') keys.w = false;
+            if (e.code === 'KeyA') keys.a = false;
+            if (e.code === 'KeyS') keys.s = false;
+            if (e.code === 'KeyD') keys.d = false;
+            if (e.code === 'Space') keys.space = false;
+        });
+
+        // --- 3. MODELL-VERWALTUNG & CLONING ---
+        const gltfLoader = new GLTFLoader();
+        const modelCache = {}; // Cache für verschiedene Modelle (baum, tree, etc.)
+        let collidables = []; // Globale Liste für Box-Kollisionen
+
+        // Erlaubte Modellnamen laut deiner Definition
+        const modelNames = ['baum', 'barrier', 'tree', 'bush'];
+
+        // Funktion zum Vorabladen der Modelle in den Cache
+        function preloadModel(name, url) {
+            gltfLoader.load(url, (gltf) => {
+                modelCache[name] = gltf.scene;
+                // Generiere Chunks initial neu, falls Modelle verspätet laden
+                updateChunks(true);
+            }, undefined, (err) => console.error(`Fehler beim Laden von ${name}:`, err));
+        }
+
+        // Nutzen deines gewünschten Klon-Ansatzes mit SkeletonUtils
+        function addModelClone(name, x, y, z, scale = 1) {
+            const cachedModel = modelCache[name];
+            if (!cachedModel) return null;
+
+            const clonedObj = SkeletonUtils.clone(cachedModel);
+            clonedObj.scale.set(scale, scale, scale);
+            clonedObj.position.set(x, y, z);
+            
+            scene.add(clonedObj);
+            collidables.push(clonedObj);
+
+            return clonedObj;
+        }
+
+        // Dummy-Modell-Erstellung (Falls echte .glb-Dateien lokal fehlen, stürzt das Spiel nicht ab)
+        function createDummyModel(color) {
+            const group = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 2), new THREE.MeshStandardMaterial({color: 0x8B4513}));
+            trunk.position.y = 1;
+            const top = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshStandardMaterial({color: color}));
+            top.position.y = 2.5;
+            group.add(trunk, top);
+            return group;
+        }
+        
+        // Befüllen des Caches mit Fallback zu Demozwecken
+        modelNames.forEach((name, index) => {
+            // HINWEIS: Ersetze die URL mit deinen echten Pfaden (z.B. 'models/tree.glb')
+            preloadModel(name, `models/${name}.glb`);
+            // Fallback-Dummies direkt aktivieren, falls Server-Pfade fehlen:
+            const colors = [0x2e8b57, 0x8b0000, 0x006400, 0x556b2f];
+            modelCache[name] = createDummyModel(colors[index]);
+        });
+
+        // --- 4. CHUNK SYSTEM ---
+        const CHUNK_SIZE = 50;
+        const RENDER_DISTANCE = 2; // Radius um den Spieler
+        const loadedChunks = new Map();
+
+        function getChunkKey(cx, cz) { return `${cx},${cz}`; }
+
+        function updateChunks(force = false) {
+            const currentCx = Math.floor(player.position.x / CHUNK_SIZE);
+            const currentCz = Math.floor(player.position.z / CHUNK_SIZE);
+
+            document.getElementById('chunkId').innerText = `${currentCx},${currentCz}`;
+
+            let chunksToKeep = new Set();
+
+            for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x++) {
+                for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z++) {
+                    const cx = currentCx + x;
+                    const cz = currentCz + z;
+                    const key = getChunkKey(cx, cz);
+                    chunksToKeep.add(key);
+
+                    if (!loadedChunks.has(key)) {
+                        generateChunk(cx, cz);
+                    }
+                }
+            }
+
+            // Entferne zu weit entfernte Chunks aus der Szene
+            for (const [key, objects] of loadedChunks.entries()) {
+                if (!chunksToKeep.has(key)) {
+                    objects.forEach(obj => {
+                        scene.remove(obj);
+                        collidables = collidables.filter(c => c !== obj);
+                    });
+                    loadedChunks.delete(key);
+                }
+            }
+        }
+
+        function generateChunk(cx, cz) {
+            const objectsInChunk = [];
+            // Deterministischer Seed basierend auf Chunk-Koordinaten für identische Welten
+            const count = 5; 
+
+            for (let i = 0; i < count; i++) {
+                const pseudoRandom = Math.sin(cx * 12.9898 + cz * 78.233 + i) * 43758.5453123 % 1;
+                const randX = (cx * CHUNK_SIZE) + (Math.abs(pseudoRandom) * CHUNK_SIZE);
+                const randZ = (cz * CHUNK_SIZE) + (Math.abs((pseudoRandom * 10) % 1) * CHUNK_SIZE);
+                
+                // Wähle zufälligen Modelltyp aus deiner Liste
+                const modelIndex = Math.floor(Math.abs(pseudoRandom * 100)) % modelNames.length;
+                const modelName = modelNames[modelIndex];
+
+                const scale = 0.8 + Math.abs(pseudoRandom % 0.6);
+                const obj = addModelClone(randX, 0, randZ, scale);
+                
+                if (obj) objectsInChunk.push(obj);
+            }
+
+            loadedChunks.set(getChunkKey(cx, cz), objectsInChunk);
+        }
+
+        // --- 5. KOLLISION & PHYSICS ---
+        const playerRadius = 0.6;
+
+        function checkCollisions(oldPos) {
+            // Einfache Bounding-Box Kollisionsprüfung für geladene Clones
+        const playerBox = new THREE.Box3(
+new THREE.Vector3(player.position.x - playerRadius, player.position.y - 2, player.position.z - playerRadius),
+new THREE.Vector3(player.position.x + playerRadius, player.position.y, player.position.z + playerRadius)
+);
+
+for (let i = 0; i < collidables.length; i++) {
+const meshBox = new THREE.Box3().setFromObject(collidables[i]);
+
+if (playerBox.intersectsBox(meshBox)) {
+// Bei Kollision wird die Bewegung auf der XZ-Ebene zurückgesetzt
+player.position.x = oldPos.x;
+player.position.z = oldPos.z;
+break;
+}
+}
+}
+
+// --- 6. ANIMATION & LOOP ---
+const clock = new THREE.Clock();
+
+function animate() {
+requestAnimationFrame(animate);
+const delta = Math.min(clock.getDelta(), 0.1); // Deckelung gegen extreme Ruckler
+
+// UI-Koordinaten updaten
+document.getElementById('posX').innerText = Math.round(player.position.x);
+document.getElementById('posZ').innerText = Math.round(player.position.z);
+
+// Altes Positions-Backup für Kollisionsauflösung
+const oldPosition = player.position.clone();
+
+// Richtungs-Vektoren berechnen
+const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion).setY(0).normalize();
+const side = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quaternion).setY(0).normalize();
+
+moveVelocity.set(0, 0, 0);
+if (keys.w) moveVelocity.add(forward);
+if (keys.s) moveVelocity.add(forward.clone().negate());
+if (keys.d) moveVelocity.add(side);
+if (keys.a) moveVelocity.add(side.clone().negate());
+
+moveVelocity.normalize().multiplyScalar(SPEED * delta);
+player.position.add(moveVelocity);
+
+// X/Z Kollisionsprüfung direkt nach Bewegung
+checkCollisions(oldPosition);
+
+// Schwerkraft & Springen
+verticalVelocity -= GRAVITY * delta;
+player.position.y += verticalVelocity * delta;
+
+if (player.position.y <= 2) { // 2 = Augenhöhe über dem Boden (y=0)
+player.position.y = 2;
+verticalVelocity = 0;
+isGrounded = true;
+} else {
+isGrounded = false;
+}
+
+if (keys.space && isGrounded) {
+verticalVelocity = JUMP_FORCE;
+isGrounded = false;
+}
+
+// Chunk Management triggern
+updateChunks();
+
+renderer.render(scene, camera);
+}
+
+// --- 7. FENSTERGRÖSSE ANPASSEN ---
+window.addEventListener('resize', () => {
+camera.aspect = window.innerWidth / window.innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// Start des Spiels
+animate();
