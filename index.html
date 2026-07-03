@@ -16,10 +16,6 @@ body {
   height: 100vh;
 }
 
-.menu {
-  text-align: center;
-}
-
 button {
   padding: 20px 40px;
   font-size: 22px;
@@ -37,16 +33,9 @@ button:hover {
 
 <body>
 
-<div class="menu">
-  <h1>Level Auswahl</h1>
-  <button onclick="startGame()">Game Start</button>
-</div>
-
-<script>
-function startGame() {
-  window.location.href = "Game_start.html";
-}
-</script>
+<button onclick="location.href='game_start.html'">
+  Level Start
+</button>
 
 </body>
 </html>
