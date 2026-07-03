@@ -1,11 +1,9 @@
 {
   "name": "geometry-dash-clone",
   "version": "1.0.0",
-  "description": "Simple Geometry Dash Style Game",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "install": "echo \"Use npm install express\""
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.19.2"
