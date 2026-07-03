@@ -257,3 +257,250 @@ function updateChunks() {
                         // Da die zugrundeliegenden Geometrien des geklonten Baums im Master-Modell liegen,
                         // löschen wir hier gezielt nur die individuellen Mesh-Referenzen des Chunks.
                         if (object.geometry && object.parent.name === "boden") {
+object.geometry.dispose();
+}
+if (object.material) {
+if (Array.isArray(object.material)) {
+object.material.forEach(mat => mat.dispose());
+} else {
+object.material.dispose();
+}
+}
+}
+});
+
+loadedChunks.delete(key);
+}
+}
+
+// UI-Aktualisierung der geladenen Daten
+ui.loadedChunks.innerText = loadedChunks.size;
+}
+}
+
+// Baut die geometrischen Objekte für ein Planquadrat auf
+function buildChunk(cx, cz, key) {
+const chunkGroup = new THREE.Group();
+chunkGroup.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
+
+// 1. Lokales Bodensegment erzeugen
+const floorGeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE);
+const floorMat = new THREE.MeshStandardMaterial({
+color: 0x3b7a57, // Sattes Naturgrün
+roughness: 0.9,
+metalness: 0.1
+});
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.name = "boden";
+floor.rotation.x = -Math.PI / 2; // Flach auf den Boden legen
+// Verschiebung in die Mitte des lokalen Chunk-Koordinatensystems
+floor.position.set(CHUNK_SIZE / 2, 0, CHUNK_SIZE / 2);
+floor.receiveShadow = true;
+chunkGroup.add(floor);
+
+// 2. Deterministische Zufallsbäume platzieren (Bleiben beim Wiederbetreten exakt identisch)
+if (!chunkSeeds.has(key)) {
+chunkSeeds.set(key, Math.random());
+}
+const seed = chunkSeeds.get(key);
+
+// Pseudo-Zufallszahlengenerator, um Abhängigkeit vom Seed zu gewährleisten
+let pseudoRandom = seed;
+function random() {
+let x = Math.sin(pseudoRandom++) * 10000;
+return x - Math.floor(x);
+}
+
+// Feste Anzahl von Bäumen pro Planquadrat
+const treeCount = 8;
+for (let i = 0; i < treeCount; i++) {
+// Bestimme lokale Koordinaten innerhalb des Chunks (Pufferzonen verhindern Clipping an Grenzen)
+const localX = PufferZone(random() * CHUNK_SIZE);
+const localZ = PufferZone(random() * CHUNK_SIZE);
+
+// Sicheres Klonen über das vorab gecashte Master-Modell
+if (modelPalette['baum'].model) {
+const treeClone = modelPalette['baum'].model.clone(true);
+
+// Zufällige Skalierung und Rotation für optische Vielfalt
+const scale = 0.8 + random() * 0.5;
+treeClone.scale.set(scale, scale, scale);
+treeClone.rotation.y = random() * Math.PI * 2;
+
+// Absolute Platzierung im Chunk-Raum
+treeClone.position.set(localX, 0, localZ);
+
+// Frustum Culling auf jedem Mesh des Klons erzwingen
+treeClone.traverse(child => {
+if (child.isMesh) child.frustumCulled = true;
+});
+
+chunkGroup.add(treeClone);
+}
+}
+
+// Der Szene hinzufügen und im RAM-Verzeichnis registrieren
+scene.add(chunkGroup);
+loadedChunks.set(key, chunkGroup);
+}
+
+// Verhindert das exakte Platzieren auf den Außenkanten eines Chunks
+function PufferZone(val) {
+return Math.max(2, Math.min(CHUNK_SIZE - 2, val));
+}
+
+// ==========================================
+// SOUVERÄNE FPS-STEUERUNG (Pointer Lock)
+// ==========================================
+function setupControls() {
+// Aktivierung des Mouse-Lock-Verfahrens bei Klick
+ui.blocker.addEventListener('click', () => {
+document.body.requestPointerLock();
+});
+
+document.addEventListener('pointerlockchange', () => {
+if (document.pointerLockElement === document.body) {
+ui.blocker.style.display = 'none';
+} else {
+ui.blocker.style.display = 'flex';
+}
+});
+
+// Mausbewegung direkt auf die Rotation der Kamera übertragen
+document.addEventListener('mousemove', (e) => {
+if (document.pointerLockElement !== document.body) return;
+
+// Sensitivitätsfaktor anpassen für sanftes Schwenken
+const sensitivity = 0.002;
+camera.rotation.y -= e.movementX * sensitivity;
+camera.rotation.x -= e.movementY * sensitivity;
+
+// Vertikalen Blickwinkel auf 90 Grad nach oben/unten limitieren (Verhindert Überschlag)
+camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+});
+
+// Kamera-Rotationsordnung auf 'YXZ' setzen, um typische Ecken-Flips (Gimbal Lock) zu vermeiden
+camera.rotation.order = 'YXZ';
+
+// Key-Events
+window.addEventListener('keydown', (e) => handleKey(e.key, true));
+window.addEventListener('keyup', (e) => handleKey(e.key, false));
+}
+
+function handleKey(key, isDown) {
+switch (key.toLowerCase()) {
+case 'w': keys.w = isDown; break;
+case 'a': keys.a = isDown; break;
+case 's': keys.s = isDown; break;
+case 'd': keys.d = isDown; break;
+case ' ':
+if (isDown && player.canJump) {
+player.velocity.y = player.jumpStrength;
+player.canJump = false;
+}
+break;
+}
+}
+
+// Adjustierung bei Bildschirmgrößenänderung
+function onWindowResize() {
+camera.aspect = window.innerWidth / window.innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// ==========================================
+// PHYSIK, KOLLISION & BEWEGUNG
+// ==========================================
+function updatePhysics(delta) {
+if (document.pointerLockElement !== document.body) return;
+
+// 1. Reibungs- / Dämpfungseffekt auf horizontaler Ebene berechnen (Gleitstopp)
+player.velocity.x -= player.velocity.x * 10.0 * delta;
+player.velocity.z -= player.velocity.z * 10.0 * delta;
+
+// 2. Gravitationswirkung anwenden
+player.velocity.y -= player.g * delta;
+
+// 3. Bewegungsrichtung anhand des Kamerablickwinkels ermitteln
+player.direction.z = Number(keys.w) - Number(keys.s);
+player.direction.x = Number(keys.d) - Number(keys.a);
+player.direction.normalize(); // Verhindert schnelleres Laufen bei Diagonalbewegung
+
+// Vorwärts- & Seitwärtsvektoren separieren
+const camDirection = new THREE.Vector3();
+camera.getWorldDirection(camDirection);
+
+// Y-Komponente eliminieren, um Laufen in den Boden/Himmel zu unterbinden
+const forward = new THREE.Vector3(camDirection.x, 0, camDirection.z).normalize();
+const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+
+// Geschwindigkeit addieren
+if (keys.w || keys.s) {
+player.velocity.z += player.direction.z * player.speed * delta;
+}
+if (keys.a || keys.d) {
+player.velocity.x += player.direction.x * player.speed * delta;
+}
+
+// 4. Temporäre Positionsverschiebung anwenden
+const moveX = (forward.x * player.velocity.z + right.x * player.velocity.x) * 10 * delta;
+const moveZ = (forward.z * player.velocity.z + right.z * player.velocity.x) * 10 * delta;
+
+camera.position.x += moveX;
+camera.position.z += moveZ;
+camera.position.y += player.velocity.y * delta;
+
+// 5. KOLLISIONSMATRIX (AABB-Weltgrenzen-Kollision)
+if (camera.position.x < -HALF_WORLD_SIZE) camera.position.x = -HALF_WORLD_SIZE;
+if (camera.position.x > HALF_WORLD_SIZE) camera.position.x = HALF_WORLD_SIZE;
+if (camera.position.z < -HALF_WORLD_SIZE) camera.position.z = -HALF_WORLD_SIZE;
+if (camera.position.z > HALF_WORLD_SIZE) camera.position.z = HALF_WORLD_SIZE;
+
+// Einfache Kollisionsabfrage mit dem flachen Boden (Y=0)
+if (camera.position.y < player.height) {
+player.velocity.y = 0;
+camera.position.y = player.height;
+player.canJump = true;
+}
+}
+
+// ==========================================
+// RENDER LOOP & TELEMETRIE
+// ==========================================
+function animate() {
+requestAnimationFrame(animate);
+
+const delta = Math.min(clock.getDelta(), 0.1); // Deckelung gegen extreme Zeit-Sprünge bei Lag
+
+// Physik & Chunk-Verwaltung updaten
+updatePhysics(delta);
+updateChunks();
+
+// Szene zeichnen
+renderer.render(scene, camera);
+
+// Echtzeit-Telemetrie in der UI ausgeben
+updateUI();
+}
+
+function updateUI() {
+// Performance-schonendes Auslesen der Positionswerte
+ui.posX.innerText = camera.position.x.toFixed(1);
+ui.posY.innerText = camera.position.y.toFixed(1);
+ui.posZ.innerText = camera.position.z.toFixed(1);
+ui.chunk.innerText = ${currentChunkX},${currentChunkZ};
+
+// FPS-Berechnung über Frameintervalle
+fpsFrameCount++;
+const time = performance.now();
+if (time >= fpsLastTime + 1000) {
+ui.fps.innerText = Math.round((fpsFrameCount * 1000) / (time - fpsLastTime));
+fpsFrameCount = 0;
+fpsLastTime = time;
+}
+}
+
+// App starten, sobald das DOM geladen ist
+window.onload = init;
+
